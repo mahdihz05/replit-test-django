@@ -1,0 +1,2 @@
+- [Django workflow path](django-workflow-path.md) — artifact.toml run command must use absolute path for Django manage.py
+- [Django app naming](django-app-naming.md) — channels app renamed to channels_app to avoid Django Channels conflict

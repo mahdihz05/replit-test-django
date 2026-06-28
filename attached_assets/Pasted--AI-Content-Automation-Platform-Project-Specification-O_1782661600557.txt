@@ -1,0 +1,729 @@
+# AI Content Automation Platform — Project Specification
+
+## Overview
+
+A multi-tenant SaaS platform for AI-powered content creation, management, and automated publishing across multiple social platforms.
+
+The platform is sold to multiple customers (businesses, agencies, creators). Each customer has an independent Workspace. Core services (AI engine, Bots, Scheduler) are shared across all customers.
+
+---
+
+## Tech Stack
+
+- **Backend:** Python / Django + Django REST Framework
+- **Frontend:** HTML + CSS + JavaScript (vanilla) — no framework yet
+- **Database:** PostgreSQL
+- **Authentication:** JWT (access + refresh tokens)
+- **Task Queue:** Django-Q or APScheduler (no Celery)
+- **AI Provider:** OpenAI API (GPT-4o for text, DALL-E 3 for images)
+- **File Storage:** Local filesystem — media files stored in `/media/content/`
+- **Bots:** python-telegram-bot (shared bot instance, not per-customer)
+
+---
+
+## Architecture: Multi-Tenant (Row-Level)
+
+All data is scoped to a `Workspace`. There is NO per-customer database or schema. Every model that holds business data has a `workspace` foreign key.
+
+Single Django project with the following apps:
+
+```
+users/
+workspaces/
+channels/
+content/
+ai_engine/
+publishing/
+wallet/
+reports/
+```
+
+---
+
+## Database Design
+
+### General Rules
+- Primary keys: UUID for all main entities, integer for log/transaction tables
+- All main models have `created_at` (auto) and `updated_at` (auto)
+- Soft delete: `is_active = BooleanField(default=True)` — never hard delete main records
+- No data exists outside a Workspace (except User)
+
+---
+
+### Model: User
+
+```
+- id: UUID, primary key
+- phone_number: CharField(max_length=13), unique, indexed — format: 09XXXXXXXXX
+- full_name: CharField(max_length=255), optional
+- is_active: BooleanField, default=True
+- is_staff: BooleanField, default=False
+- created_at: DateTimeField, auto
+```
+
+Authentication: phone_number is the USERNAME_FIELD. Use AbstractBaseUser.
+
+---
+
+### Model: OTPCode
+
+```
+- id: Integer, primary key
+- phone_number: CharField(max_length=13)
+- code: CharField(max_length=6) — 6-digit random number
+- is_used: BooleanField, default=False
+- expires_at: DateTimeField — 5 minutes after creation
+- created_at: DateTimeField, auto
+```
+
+OTP flow:
+1. User submits phone number → generate 6-digit code → save → send SMS
+2. User submits code → verify → mark as used → return JWT tokens
+3. If user doesn't exist → create user on first verified OTP
+4. Old unused codes for same phone are invalidated on new request
+
+---
+
+### Model: Workspace
+
+```
+- id: UUID, primary key
+- name: CharField(max_length=255)
+- owner: ForeignKey(User, on_delete=PROTECT, related_name='owned_workspaces')
+- is_active: BooleanField, default=True
+- created_at: DateTimeField, auto
+- updated_at: DateTimeField, auto
+```
+
+---
+
+### Model: WorkspaceMember
+
+```
+- id: Integer, primary key
+- workspace: ForeignKey(Workspace, CASCADE, related_name='members')
+- user: ForeignKey(User, CASCADE, related_name='memberships')
+- role: CharField — choices: 'admin', 'manager'
+- added_by: ForeignKey(User, SET_NULL, null=True)
+- created_at: DateTimeField, auto
+- unique_together: (workspace, user)
+```
+
+Role rules:
+- **admin:** Can add/remove members, manage channels, manage content, manage settings
+- **manager:** Can create/edit content, publish content — cannot manage members or channels
+- Workspace owner is automatically admin on creation
+
+Adding members: Admin enters a user's phone number → if user exists → added instantly. No invitation email, no confirmation step.
+
+---
+
+### Model: Wallet
+
+```
+- id: Integer, primary key
+- workspace: OneToOneField(Workspace, CASCADE, related_name='wallet')
+- balance: DecimalField(max_digits=12, decimal_places=2), default=0.00
+- updated_at: DateTimeField, auto
+```
+
+---
+
+### Model: WalletTransaction
+
+```
+- id: Integer, primary key
+- wallet: ForeignKey(Wallet, CASCADE, related_name='transactions')
+- type: CharField — choices: 'charge', 'deduct'
+- amount: DecimalField(max_digits=10, decimal_places=2)
+- description: TextField — example: "تولید محتوا - عنوان پست"
+- created_at: DateTimeField, auto
+```
+
+Billing rules:
+- Deduction happens ONLY after successful AI operation — never before
+- If balance is insufficient → reject operation → show error to user
+- Charge happens when admin tops up the wallet manually or via payment
+- Deduction amounts (placeholder values, to be configured later):
+  - Text generation: 10 units
+  - Image generation: 25 units
+  - Content rewrite: 8 units
+  - Title suggestions: 3 units
+  - Hashtag suggestions: 2 units
+
+---
+
+### Model: Content
+
+```
+- id: UUID, primary key
+- workspace: ForeignKey(Workspace, CASCADE, related_name='contents')
+- created_by: ForeignKey(User, SET_NULL, null=True)
+- title: CharField(max_length=300), default="untitled"
+- body: TextField, blank=True — main content text
+- status: CharField — choices: 'draft', 'ready', 'scheduled', 'publishing', 'published', 'failed', default='draft'
+- language: CharField(max_length=10), default='fa'
+- goal: CharField(max_length=300), blank=True — e.g., "افزایش فروش", "آموزش"
+- tags: JSONField(default=list) — list of strings
+- image: ImageField(upload_to='content/images/', null=True, blank=True)
+- scheduled_at: DateTimeField, null=True, blank=True
+- published_at: DateTimeField, null=True, blank=True
+- created_at: DateTimeField, auto
+- updated_at: DateTimeField, auto
+```
+
+---
+
+### Model: ContentVersion
+
+```
+- id: Integer, primary key
+- content: ForeignKey(Content, CASCADE, related_name='versions')
+- body: TextField
+- version_number: IntegerField
+- source: CharField — choices: 'user', 'ai'
+- ai_model: CharField(max_length=100), blank=True — e.g., "gpt-4o"
+- created_at: DateTimeField, auto
+```
+
+A new version is saved every time content body is changed (either by user or AI rewrite).
+
+---
+
+### Model: AIChatSession
+
+```
+- id: UUID, primary key
+- workspace: ForeignKey(Workspace, CASCADE, related_name='chat_sessions')
+- user: ForeignKey(User, CASCADE)
+- content: ForeignKey(Content, SET_NULL, null=True, blank=True) — optional link
+- title: CharField(max_length=255), default='New Chat'
+- created_at: DateTimeField, auto
+- updated_at: DateTimeField, auto
+```
+
+---
+
+### Model: AIChatMessage
+
+```
+- id: Integer, primary key
+- session: ForeignKey(AIChatSession, CASCADE, related_name='messages')
+- role: CharField — choices: 'user', 'assistant'
+- type: CharField — choices: 'text', 'image'
+- body: TextField, blank=True — text content
+- image_url: CharField(max_length=500), blank=True — for image messages
+- metadata: JSONField(null=True) — model used, tokens consumed, cost
+- created_at: DateTimeField, auto
+```
+
+---
+
+### Model: PublishChannel
+
+```
+- id: UUID, primary key
+- workspace: ForeignKey(Workspace, CASCADE, related_name='channels')
+- platform: CharField — choices: 'telegram', 'bale', 'website'
+- channel_type: CharField — choices: 'channel', 'group', 'supergroup', 'page', blank=True
+- name: CharField(max_length=255)
+- external_id: CharField(max_length=255) — chat_id for telegram/bale, domain for website
+- username: CharField(max_length=255), blank=True
+- extra_data: JSONField(null=True) — platform-specific metadata
+- is_verified: BooleanField, default=False
+- is_active: BooleanField, default=True
+- created_at: DateTimeField, auto
+- unique_together: (workspace, platform, external_id)
+```
+
+---
+
+### Model: ChannelVerification
+
+```
+- id: Integer, primary key
+- workspace: ForeignKey(Workspace, CASCADE)
+- requested_by: ForeignKey(User, CASCADE)
+- platform: CharField — choices: 'telegram', 'bale'
+- token: CharField(max_length=20), unique — format: "VRF-XXXXXXXX" (8 random uppercase+digits)
+- status: CharField — choices: 'pending', 'verified', 'expired', default='pending'
+- channel: ForeignKey(PublishChannel, SET_NULL, null=True, blank=True) — filled on verification
+- expires_at: DateTimeField — 15 minutes after creation
+- created_at: DateTimeField, auto
+```
+
+Verification flow:
+1. Admin clicks "Add Channel" in panel
+2. System generates token (e.g., `VRF-AB12CD34`) and shows it with instructions
+3. Instructions: "Add bot to your channel as admin, then send this token in the channel"
+4. User adds bot as admin → sends token text in channel
+5. Bot receives message → looks up token → verifies not expired → creates PublishChannel → marks verification as verified
+6. Panel shows real-time status (poll every 5 seconds)
+
+---
+
+### Model: PublishJob
+
+```
+- id: UUID, primary key
+- content: ForeignKey(Content, CASCADE, related_name='publish_jobs')
+- channel: ForeignKey(PublishChannel, CASCADE)
+- status: CharField — choices: 'queued', 'processing', 'success', 'failed', default='queued'
+- scheduled_at: DateTimeField, null=True — if null, publish immediately
+- started_at: DateTimeField, null=True
+- completed_at: DateTimeField, null=True
+- attempt_count: IntegerField, default=0
+- max_attempts: IntegerField, default=3
+- next_retry_at: DateTimeField, null=True
+- created_at: DateTimeField, auto
+```
+
+---
+
+### Model: PublishLog
+
+```
+- id: Integer, primary key
+- job: ForeignKey(PublishJob, CASCADE, related_name='logs')
+- attempt_number: IntegerField — 1, 2, or 3
+- success: BooleanField
+- error_type: CharField — choices: 'connection_error', 'auth_error', 'bot_removed', 'rate_limit', 'unknown', blank=True
+- error_message: TextField, blank=True — full technical error for debugging
+- user_message: TextField, blank=True — human-readable message shown to user (Persian)
+- api_response: JSONField(null=True) — raw API response
+- attempted_at: DateTimeField, auto
+```
+
+Error messages shown to users (in Persian):
+- `connection_error` → "خطا در اتصال به پلتفرم. لطفاً اتصال اینترنت سرور را بررسی کنید."
+- `auth_error` → "ربات دسترسی لازم را ندارد. مطمئن شوید ربات هنوز ادمین کانال است."
+- `bot_removed` → "ربات از کانال حذف شده است. لطفاً دوباره ربات را اضافه کنید."
+- `rate_limit` → "محدودیت ارسال از طرف پلتفرم. دوباره تلاش خواهد شد."
+- `unknown` → "خطای ناشناخته رخ داد. جزئیات فنی در لاگ‌ها ثبت شده است."
+
+---
+
+## API Endpoints
+
+All endpoints return JSON. All authenticated endpoints require `Authorization: Bearer <access_token>` header.
+
+### Authentication
+
+```
+POST /api/auth/otp/request/
+  Body: { phone_number: "09..." }
+  Response: { message: "کد ارسال شد" }
+
+POST /api/auth/otp/verify/
+  Body: { phone_number: "09...", code: "123456" }
+  Response: { access: "...", refresh: "...", user: { id, phone_number, full_name } }
+
+POST /api/auth/token/refresh/
+  Body: { refresh: "..." }
+  Response: { access: "..." }
+
+GET /api/auth/me/
+  Response: { id, phone_number, full_name, memberships: [...] }
+
+PATCH /api/auth/me/
+  Body: { full_name: "..." }
+```
+
+### Workspace
+
+```
+GET    /api/workspaces/                    — list user's workspaces
+POST   /api/workspaces/                    — create new workspace
+GET    /api/workspaces/{id}/               — workspace detail
+PATCH  /api/workspaces/{id}/               — update workspace (admin only)
+
+GET    /api/workspaces/{id}/members/       — list members
+POST   /api/workspaces/{id}/members/       — add member by phone_number (admin only)
+DELETE /api/workspaces/{id}/members/{id}/  — remove member (admin only)
+```
+
+### Content
+
+```
+GET    /api/workspaces/{wid}/contents/           — list with filters: status, search, tags
+POST   /api/workspaces/{wid}/contents/           — create content
+GET    /api/workspaces/{wid}/contents/{id}/      — detail
+PATCH  /api/workspaces/{wid}/contents/{id}/      — update
+DELETE /api/workspaces/{wid}/contents/{id}/      — soft delete (set is_active=False)
+
+GET    /api/workspaces/{wid}/contents/{id}/versions/  — list versions
+POST   /api/workspaces/{wid}/contents/{id}/publish/   — trigger publish
+```
+
+### AI Engine
+
+```
+POST /api/workspaces/{wid}/ai/chat/sessions/             — create session
+GET  /api/workspaces/{wid}/ai/chat/sessions/             — list sessions
+GET  /api/workspaces/{wid}/ai/chat/sessions/{id}/        — session with messages
+POST /api/workspaces/{wid}/ai/chat/sessions/{id}/messages/ — send message
+
+POST /api/workspaces/{wid}/ai/generate/text/     — generate content text
+POST /api/workspaces/{wid}/ai/generate/image/    — generate image
+POST /api/workspaces/{wid}/ai/generate/rewrite/  — rewrite existing text
+POST /api/workspaces/{wid}/ai/generate/titles/   — suggest titles (returns list)
+POST /api/workspaces/{wid}/ai/generate/hashtags/ — suggest hashtags (returns list)
+POST /api/workspaces/{wid}/ai/generate/cta/      — generate call-to-action
+```
+
+### Channels
+
+```
+GET    /api/workspaces/{wid}/channels/                    — list channels
+POST   /api/workspaces/{wid}/channels/verify/start/       — start verification, returns token
+GET    /api/workspaces/{wid}/channels/verify/{token}/status/ — check verification status
+DELETE /api/workspaces/{wid}/channels/{id}/               — remove channel (admin only)
+```
+
+### Publishing
+
+```
+GET  /api/workspaces/{wid}/publish/jobs/         — list publish jobs with status
+GET  /api/workspaces/{wid}/publish/jobs/{id}/    — job detail with logs
+POST /api/workspaces/{wid}/publish/jobs/{id}/retry/ — manual retry failed job
+```
+
+### Wallet
+
+```
+GET  /api/workspaces/{wid}/wallet/                     — balance and summary
+GET  /api/workspaces/{wid}/wallet/transactions/        — transaction history
+POST /api/workspaces/{wid}/wallet/charge/              — add balance (admin only)
+```
+
+### Reports
+
+```
+GET /api/workspaces/{wid}/reports/content/     — content creation stats
+GET /api/workspaces/{wid}/reports/publishing/  — publish success/failure stats
+GET /api/workspaces/{wid}/reports/ai-usage/    — AI token consumption
+GET /api/workspaces/{wid}/reports/errors/      — error log summary
+```
+
+---
+
+## Business Logic
+
+### Publishing Flow
+
+1. User clicks "Publish" on a Content → selects channels → sets time (now or scheduled)
+2. System creates `PublishJob` for each channel (status: queued)
+3. Scheduler runs every minute → finds queued jobs where `scheduled_at <= now`
+4. For each job: set status=processing → attempt publish → write PublishLog
+5. On success: set status=success, `completed_at=now`
+6. On failure:
+   - Increment `attempt_count`
+   - Write log with error_type and user_message
+   - If `attempt_count < max_attempts`: set `next_retry_at = now + (attempt_count * 5 minutes)`, status=queued
+   - If `attempt_count >= max_attempts`: set status=failed — no more retries
+7. Update Content status based on jobs: all success → published, any failed → failed
+
+### Retry Schedule
+- Attempt 1 fails → retry after 5 minutes
+- Attempt 2 fails → retry after 10 minutes
+- Attempt 3 fails → permanently failed, notify admin
+
+### AI Operation Flow
+1. User requests AI operation
+2. Check wallet balance → if insufficient → return 402 error with message "موجودی کافی نیست"
+3. Call OpenAI API
+4. On success → deduct balance → save transaction with description → return result
+5. On failure → do NOT deduct → return error to user
+
+### Permission Matrix
+
+| Action | Admin | Manager |
+|--------|-------|---------|
+| Create/Edit Content | ✅ | ✅ |
+| Delete Content | ✅ | ❌ |
+| Publish Content | ✅ | ✅ |
+| Use AI | ✅ | ✅ |
+| Add/Remove Members | ✅ | ❌ |
+| Add/Remove Channels | ✅ | ❌ |
+| View Reports | ✅ | ✅ |
+| Charge Wallet | ✅ | ❌ |
+| View Wallet | ✅ | ✅ |
+| Workspace Settings | ✅ | ❌ |
+
+---
+
+## Frontend Pages (HTML + JS)
+
+All pages share a sidebar layout. Use a clean, modern design with a sidebar navigation.
+Language: Persian (RTL layout, `dir="rtl"` on body).
+No external UI framework required — plain CSS with a consistent design system.
+
+### Page List
+
+```
+/login/                        — OTP login (phone number → code)
+/dashboard/                    — overview cards + recent content
+/workspaces/                   — list workspaces, create new
+/workspaces/{id}/              — workspace home (redirect to content)
+
+/workspaces/{id}/content/      — content list with filters and search
+/workspaces/{id}/content/new/  — create content form
+/workspaces/{id}/content/{id}/ — content editor (title, body, tags, image, publish options)
+/workspaces/{id}/content/{id}/versions/ — version history
+
+/workspaces/{id}/ai/           — AI chat interface
+/workspaces/{id}/channels/     — channel list + add channel flow
+/workspaces/{id}/publish/      — publish job queue and status
+/workspaces/{id}/wallet/       — balance + transaction history
+/workspaces/{id}/reports/      — reports and analytics
+/workspaces/{id}/members/      — member management (admin only)
+/workspaces/{id}/settings/     — workspace settings (admin only)
+```
+
+### UI Notes
+
+- RTL layout throughout
+- Sidebar with: Logo, Dashboard, Content, AI Chat, Channels, Publish Queue, Reports, Wallet, Members, Settings
+- Content editor: text editor + sidebar for AI tools (generate, rewrite, title suggestions, hashtags)
+- AI chat: chat-style interface (bubble UI) with actions above input (Generate Text, Generate Image, Rewrite, Suggest Titles, Suggest Hashtags)
+- Publish flow: checkbox list of channels + datetime picker + immediate/scheduled toggle
+- Channel verification: step-by-step modal with token display and status polling
+- Error messages always shown in Persian in a toast/alert component
+
+---
+
+## Telegram & Bale Bot Integration
+
+One shared bot for Telegram, one for Bale. NOT per-customer.
+
+Bot purpose in V1:
+1. Channel verification (detect token message)
+2. Content publishing (send text/image to channel)
+
+### Bot Verification Logic
+```python
+# When bot receives any message:
+# 1. Check if message text matches pattern "VRF-XXXXXXXX"
+# 2. Look up ChannelVerification by token
+# 3. If found and not expired and status=pending:
+#    - Get chat info (chat_id, title, type, username)
+#    - Create PublishChannel with is_verified=True
+#    - Set verification.status = 'verified'
+#    - Set verification.channel = new channel
+#    - Reply: "✅ کانال با موفقیت تایید شد"
+# 4. If expired: reply "❌ کد منقضی شده است. لطفاً از پنل کد جدید دریافت کنید."
+# 5. If not found: ignore
+```
+
+### Publishing to Telegram/Bale
+```python
+# For text content: send_message(chat_id, text)
+# For content with image: send_photo(chat_id, photo=image_file, caption=text)
+# Image is read from content.image field
+# Error mapping:
+#   ConnectionError → 'connection_error'
+#   Forbidden (bot not admin / removed) → 'auth_error' or 'bot_removed'
+#   RetryAfter → 'rate_limit'
+#   Other TelegramError → 'unknown'
+```
+
+---
+
+## Website Publishing
+
+For website channel: publish via HTTP POST to a webhook URL provided by the customer.
+
+```python
+# POST to channel.extra_data['webhook_url']
+# Body: { title, body, image_url, published_at, tags }
+# Headers: { Authorization: Bearer <channel.extra_data['api_key']> }
+# Timeout: 30 seconds
+# Error mapping same as above
+```
+
+---
+
+## AI Engine Details
+
+### Text Generation
+```
+Model: gpt-4o
+System prompt: You are an expert Persian content creator for social media.
+Input: { goal, platform, tone, keywords, language, word_count }
+Output: Generated text
+```
+
+### Image Generation
+```
+Model: dall-e-3
+Size: 1024x1024
+Quality: standard (for cost efficiency)
+Input: { description, style }
+Output: image URL → download and save to media/content/images/
+```
+
+### Chat Sessions
+- Full conversation history sent on each request (no server-side context)
+- Session title auto-generated from first user message (truncated to 50 chars)
+- Each message saves token count in metadata
+
+### Available AI Actions (shown as buttons in UI)
+1. **تولید متن** (Generate Text) — full post/article
+2. **تولید تصویر** (Generate Image) — image from description
+3. **بازنویسی** (Rewrite) — rewrite selected/current text
+4. **پیشنهاد عنوان** (Suggest Titles) — returns 5 title options
+5. **پیشنهاد هشتگ** (Suggest Hashtags) — returns 10 hashtag options
+6. **تولید CTA** (Generate CTA) — returns 3 call-to-action options
+
+---
+
+## Scheduler
+
+Use APScheduler (no Celery required).
+
+```python
+# Jobs:
+# 1. Every 1 minute: process_publish_queue() — pick up queued jobs
+# 2. Every 5 minutes: process_retries() — pick up failed jobs ready for retry
+# 3. Every 1 hour: expire_otp_codes() — mark expired OTPs
+# 4. Every 1 hour: expire_verifications() — mark expired channel verifications
+```
+
+---
+
+## Environment Variables
+
+```
+SECRET_KEY=
+DEBUG=False
+DATABASE_URL=postgresql://...
+OPENAI_API_KEY=
+TELEGRAM_BOT_TOKEN=
+BALE_BOT_TOKEN=
+SMS_API_KEY=           # SMS provider for OTP
+SMS_SENDER=            # Sender number
+ALLOWED_HOSTS=
+MEDIA_ROOT=/app/media
+```
+
+---
+
+## Folder Structure
+
+```
+project/
+├── manage.py
+├── requirements.txt
+├── .env.example
+├── config/
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── users/
+│   ├── models.py       # CustomUser, OTPCode
+│   ├── views.py
+│   ├── serializers.py
+│   └── urls.py
+├── workspaces/
+│   ├── models.py       # Workspace, WorkspaceMember
+│   ├── views.py
+│   ├── serializers.py
+│   ├── permissions.py  # IsWorkspaceAdmin, IsWorkspaceMember
+│   └── urls.py
+├── content/
+│   ├── models.py       # Content, ContentVersion
+│   ├── views.py
+│   ├── serializers.py
+│   └── urls.py
+├── ai_engine/
+│   ├── models.py       # AIChatSession, AIChatMessage
+│   ├── views.py
+│   ├── serializers.py
+│   ├── openai_client.py
+│   └── urls.py
+├── channels/
+│   ├── models.py       # PublishChannel, ChannelVerification
+│   ├── views.py
+│   ├── serializers.py
+│   └── urls.py
+├── publishing/
+│   ├── models.py       # PublishJob, PublishLog
+│   ├── views.py
+│   ├── serializers.py
+│   ├── scheduler.py    # APScheduler jobs
+│   ├── publishers/
+│   │   ├── telegram.py
+│   │   ├── bale.py
+│   │   └── website.py
+│   └── urls.py
+├── wallet/
+│   ├── models.py       # Wallet, WalletTransaction
+│   ├── views.py
+│   ├── serializers.py
+│   └── urls.py
+├── reports/
+│   ├── views.py
+│   └── urls.py
+├── bots/
+│   ├── telegram_bot.py
+│   └── bale_bot.py
+└── templates/
+    ├── base.html           # sidebar layout, RTL, auth check
+    ├── auth/
+    │   └── login.html
+    ├── dashboard/
+    │   └── index.html
+    ├── content/
+    │   ├── list.html
+    │   ├── editor.html
+    │   └── versions.html
+    ├── ai/
+    │   └── chat.html
+    ├── channels/
+    │   └── list.html
+    ├── publishing/
+    │   └── queue.html
+    ├── wallet/
+    │   └── index.html
+    ├── reports/
+    │   └── index.html
+    ├── members/
+    │   └── list.html
+    └── settings/
+        └── index.html
+```
+
+---
+
+## Important Implementation Notes
+
+1. All user-facing text and error messages must be in **Persian (Farsi)**
+2. All dates displayed to users in **Jalali (Shamsi)** calendar — use `django-jalali` or `jdatetime`
+3. RTL layout — add `dir="rtl"` to HTML body, use `text-align: right` as default
+4. Phone number format: always stored as `09XXXXXXXXX` (11 digits, starts with 09)
+5. Workspace context: all API views must validate user is a member of the requested workspace
+6. Media files: never expose direct filesystem paths to users — use Django's MEDIA_URL
+7. Content `status` transitions:
+   - draft → ready (user marks as ready)
+   - ready → publishing (system picks up)
+   - publishing → published / failed
+   - Any status → scheduled (user schedules it)
+   - scheduled → publishing (scheduler picks up)
+8. JWT access token expiry: 60 minutes. Refresh token expiry: 30 days.
+9. All API responses follow consistent format:
+```json
+{ "success": true, "data": {...} }
+{ "success": false, "error": "پیام خطا به فارسی", "code": "ERROR_CODE" }
+```
+
+---
+
+## What NOT to Build in V1
+
+- Payment gateway integration (wallet is topped up manually)
+- SMS Broadcast / Email Broadcast
+- LinkedIn publishing
+- Multiple bot instances per customer
+- Advanced analytics / AI insights
+- Mobile app
+- Webhook incoming events (except website publishing)

@@ -1,0 +1,63 @@
+export const API_BASE_URL = "/api";
+
+export function getToken() {
+  return localStorage.getItem("access_token");
+}
+
+export function setToken(token: string) {
+  localStorage.setItem("access_token", token);
+}
+
+export function removeToken() {
+  localStorage.removeItem("access_token");
+}
+
+export function getSelectedWorkspace() {
+  return localStorage.getItem("selected_workspace_id");
+}
+
+export function setSelectedWorkspace(id: string) {
+  localStorage.setItem("selected_workspace_id", id);
+}
+
+interface FetchOptions extends RequestInit {
+  data?: any;
+}
+
+export async function apiFetch(endpoint: string, options: FetchOptions = {}) {
+  const { data, headers: customHeaders, ...rest } = options;
+  const token = getToken();
+
+  const headers = new Headers(customHeaders);
+  headers.set("Content-Type", "application/json");
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const config: RequestInit = {
+    ...rest,
+    headers,
+  };
+
+  if (data) {
+    config.body = JSON.stringify(data);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      removeToken();
+      window.location.href = "/login";
+    }
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || errorData.message || "خطا در برقراری ارتباط با سرور");
+  }
+
+  // Some endpoints might return empty response
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
+}

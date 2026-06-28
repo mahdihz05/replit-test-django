@@ -1,45 +1,78 @@
-# [Project name]
+# محتوایار — AI Content Automation Platform
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+یک پلتفرم SaaS چند فضای‌کاری برای مدیریت و انتشار محتوای هوش مصنوعی.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `python /home/runner/workspace/backend/manage.py runserver 0.0.0.0:8000` — Django API (port 8000)
+- `pnpm --filter @workspace/frontend run dev` — React Vite frontend (port 18130)
+- `cd backend && python manage.py makemigrations` — create migrations
+- `cd backend && python manage.py migrate` — apply migrations
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- **Backend:** Django 5 + DRF + PostgreSQL + JWT (djangorestframework-simplejwt) + APScheduler
+- **Frontend:** React + Vite + Tailwind + shadcn/ui — Persian RTL (Vazirmatn font)
+- **AI:** OpenAI GPT-4o (text + DALL-E 3 images)
+- **Publishing:** Telegram Bot API + Bale Messenger API + Webhooks
+- **DB:** PostgreSQL (managed by Replit)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `backend/` — Django project root
+- `backend/config/` — settings, urls, wsgi, exception handler
+- `backend/users/` — OTP auth, JWT, user model
+- `backend/workspaces/` — multi-tenant workspace + members
+- `backend/content/` — content CRUD + versioning
+- `backend/ai_engine/` — OpenAI integration (generate, rewrite, chat, titles, hashtags)
+- `backend/channels_app/` — Telegram/Bale/Website channel management
+- `backend/publishing/` — PublishJob queue + scheduler + retry logic
+- `backend/wallet/` — credit wallet per workspace
+- `backend/reports/` — aggregated analytics endpoints
+- `artifacts/frontend/src/` — React pages (all RTL Persian)
+- `artifacts/frontend/src/lib/api.ts` — fetch-based API client with JWT
+- `artifacts/frontend/src/lib/auth.tsx` — auth context + workspace state
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Django backend serves `/api/*` and `/media/*` via proxy; React frontend serves `/`
+- JWT stored in `localStorage` as `access_token`; selected workspace in `selected_workspace_id`
+- APScheduler runs in-process with Django (started in `config/apps.py ready()`)
+- OTP codes are printed to console; SMS_API_KEY env var needed for real SMS
+- Publishing retries: max 3 attempts, 5-min exponential backoff between retries
+- Wallet costs configurable in `settings.WALLET_COSTS`
+
+## Required env vars
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection (already set) |
+| `OPENAI_API_KEY` | GPT-4o + DALL-E 3 |
+| `TELEGRAM_BOT_TOKEN` | Telegram channel publishing |
+| `BALE_BOT_TOKEN` | Bale messenger publishing |
+| `SMS_API_KEY` | OTP SMS delivery |
+| `SESSION_SECRET` | Django SECRET_KEY (already set) |
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- **Authentication:** OTP phone login (no password)
+- **Workspaces:** Multi-tenant, role-based (admin/manager)
+- **Content:** Create, edit, version history, AI generation, schedule, publish
+- **AI Engine:** Text generation, image generation, rewrite, title/hashtag suggestions, CTA, chat
+- **Channels:** Connect Telegram/Bale channels via verification token flow
+- **Publishing:** Async job queue with retry, per-channel status tracking
+- **Wallet:** Per-workspace credit balance, transaction log, AI cost deduction
+- **Reports:** Content stats, publish success rate, AI usage, error analysis
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- UI must be Persian (Farsi) and RTL
+- React frontend (not vanilla JS)
+- All API responses use `{ success: true/false, data/error, code }` format
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- Workflow command uses absolute path: `python /home/runner/workspace/backend/manage.py`
+- `channels` app renamed to `channels_app` to avoid conflict with Django Channels package
+- Google Font (Vazirmatn) loaded in both `index.html` and `index.css` — must be first import
+- APScheduler starts on Django startup; if it fails, publishing queue won't process automatically
