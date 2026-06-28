@@ -37,10 +37,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshWorkspaces = async () => {
     try {
-      const data = await apiFetch("/workspaces/");
-      setWorkspaces(data);
-      if (data.length > 0 && !selectedWorkspaceId) {
-        selectWorkspace(data[0].id);
+      const response = await apiFetch("/workspaces/");
+      const list = Array.isArray(response) ? response : (response?.data ?? []);
+      setWorkspaces(list);
+      if (list.length > 0 && !selectedWorkspaceId) {
+        selectWorkspace(list[0].id);
       }
     } catch (error) {
       console.error("Failed to load workspaces", error);
