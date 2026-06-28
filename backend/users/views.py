@@ -120,6 +120,57 @@ def token_refresh(request):
     return Response({'success': True, 'data': serializer.validated_data})
 
 
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def password_login(request):
+    phone_number = request.data.get('phone_number', '').strip()
+    password = request.data.get('password', '')
+
+    if not phone_number or not password:
+        return Response({
+            'success': False,
+            'error': 'شماره موبایل و رمز عبور الزامی است',
+            'code': 'MISSING_FIELDS'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(phone_number=phone_number)
+    except User.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'شماره موبایل یا رمز عبور اشتباه است',
+            'code': 'INVALID_CREDENTIALS'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not user.check_password(password):
+        return Response({
+            'success': False,
+            'error': 'شماره موبایل یا رمز عبور اشتباه است',
+            'code': 'INVALID_CREDENTIALS'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    if not user.is_active:
+        return Response({
+            'success': False,
+            'error': 'حساب کاربری غیرفعال است',
+            'code': 'ACCOUNT_DISABLED'
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'success': True,
+        'data': {
+            'access': str(refresh.access_token),
+            'refresh': str(refresh),
+            'user': {
+                'id': str(user.id),
+                'phone_number': user.phone_number,
+                'full_name': user.full_name,
+            }
+        }
+    })
+
+
 @api_view(['GET', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def me(request):
