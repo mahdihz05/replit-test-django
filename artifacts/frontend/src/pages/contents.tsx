@@ -37,12 +37,11 @@ export default function Contents() {
   const fetchContents = async () => {
     setLoading(true);
     try {
-      const data = await apiFetch(`/workspaces/${selectedWorkspace?.id}/contents/`).catch(() => [
-        { id: "1", title: "پست وبلاگ هوش مصنوعی", status: "draft", created_at: new Date().toISOString() },
-        { id: "2", title: "اطلاعیه فروش ویژه", status: "published", created_at: new Date(Date.now() - 86400000).toISOString() },
-        { id: "3", title: "معرفی محصول جدید", status: "scheduled", created_at: new Date().toISOString() },
-      ]);
-      setContents(data);
+      const response = await apiFetch(`/workspaces/${selectedWorkspace?.id}/contents/`);
+      const list = Array.isArray(response) ? response : (response?.data ?? []);
+      setContents(list);
+    } catch {
+      setContents([]);
     } finally {
       setLoading(false);
     }
