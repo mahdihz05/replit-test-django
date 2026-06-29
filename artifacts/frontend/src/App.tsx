@@ -17,6 +17,8 @@ import AiGenerate from "@/pages/ai-generate";
 import AiImages from "@/pages/ai-images";
 import Channels from "@/pages/channels";
 import Publish from "@/pages/publish";
+import PublishQueue from "@/pages/publish-queue";
+import PublishHistory from "@/pages/publish-history";
 import Wallet from "@/pages/wallet";
 import Reports from "@/pages/reports";
 import Members from "@/pages/members";
@@ -43,6 +45,8 @@ function Router() {
         <Route path="/ai/images" component={AiImages} />
         <Route path="/channels" component={Channels} />
         <Route path="/publish" component={Publish} />
+        <Route path="/publish/queue" component={PublishQueue} />
+        <Route path="/publish/history" component={PublishHistory} />
         <Route path="/wallet" component={Wallet} />
         <Route path="/reports" component={Reports} />
         <Route path="/members" component={Members} />

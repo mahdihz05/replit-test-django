@@ -1,0 +1,317 @@
+We are continuing development of our AI Content Automation Platform (Django + HTML/JS). 
+Phase 1 (Auth, Workspace, Users) and Phase 2 (AI Content Generation) are complete.
+
+Now implement Phase 3: Publishing Engine & Automation (موتور انتشار و اتوماسیون).
+
+---
+
+## IMPORTANT RULES
+- Do NOT break any existing Phase 1 or Phase 2 functionality
+- Write complete, working code for every file — no placeholders, no truncation
+- Bot tokens are stored as environment variables (I will set them manually):
+  - TELEGRAM_BOT_TOKEN — one central bot for all workspaces
+  - BALE_BOT_TOKEN — one central bot for all workspaces
+- All UI text and error messages must support Persian (RTL)
+- Everything must be scoped to the user's active Workspace (multi-tenant)
+- Use APScheduler (already in project) for scheduled publishing — do NOT add Celery
+
+---
+
+## NEW DJANGO APP
+
+Create a new Django app called `publishing`.
+
+---
+
+## DATABASE MODELS
+
+### Channel Model
+Represents a Telegram/Bale channel or group connected to a Workspace.
+
+Fields:
+- id (UUID, primary key)
+- workspace (FK to Workspace)
+- added_by (FK to User)
+- platform (CharField, choices: telegram, bale, website, linkedin)
+- channel_type (CharField, choices: channel, group)
+- name (CharField) — display name, e.g. "کانال اخبار ما"
+- chat_id (CharField) — Telegram/Bale chat ID, stored after verification
+- username (CharField, nullable) — @username if public
+- is_verified (BooleanField, default=False)
+- verification_code (CharField, nullable) — temporary code used during verification
+- verification_expires_at (DateTimeField, nullable)
+- is_active (BooleanField, default=True) — soft delete
+- created_at, updated_at
+
+### PublishJob Model
+Represents a single publishing task (immediate or scheduled).
+
+Fields:
+- id (UUID, primary key)
+- workspace (FK to Workspace)
+- created_by (FK to User)
+- content (FK to Content app's Content model, nullable)
+- custom_text (TextField, nullable) — if user types directly without using Content model
+- media_urls (JSONField, default=[]) — list of image/file URLs to attach
+- target_channels (ManyToMany to Channel) — can be multiple channels
+- status (CharField, choices: pending, processing, published, failed, cancelled)
+- publish_type (CharField, choices: immediate, scheduled)
+- scheduled_at (DateTimeField, nullable) — when to publish if scheduled
+- published_at (DateTimeField, nullable) — when actually published
+- retry_count (IntegerField, default=0)
+- max_retries (IntegerField, default=3)
+- error_log (TextField, nullable)
+- is_active (BooleanField, default=True)
+- created_at, updated_at
+
+### PublishResult Model
+Stores per-channel result for each PublishJob.
+
+Fields:
+- id (UUID, primary key)
+- job (FK to PublishJob)
+- channel (FK to Channel)
+- status (CharField, choices: success, failed)
+- platform_message_id (CharField, nullable) — message ID returned by Telegram/Bale
+- error_message (TextField, nullable)
+- published_at (DateTimeField, nullable)
+- created_at
+
+Run migrations after creating models.
+
+---
+
+## CHANNEL VERIFICATION FLOW
+
+This is how users connect their Telegram or Bale channel/group:
+
+### Step 1 — Request Verification
+POST /api/publishing/channels/verify/start/
+- Request: { workspace_id, platform (telegram/bale), channel_type (channel/group), name }
+- Generate a unique verification_code (format: VERIFY_XXXXXXXX, 8 random uppercase alphanumeric chars)
+- Save Channel record with is_verified=False, store verification_code, set verification_expires_at = now + 10 minutes
+- Return: { channel_id, verification_code, instructions_text }
+- instructions_text (in Persian): "ربات را به کانال/گروه خود اضافه کنید و آن را ادمین کنید، سپس این کد را در کانال/گروه ارسال کنید: VERIFY_XXXXXXXX"
+
+### Step 2 — Bot Polling (Background)
+Create a management command: python manage.py run_bot_polling
+
+This command runs a long-polling loop for both Telegram and Bale bots simultaneously using threading:
+
+For each incoming message update:
+1. Check if message text matches pattern VERIFY_XXXXXX
+2. Query Channel table for matching verification_code where is_verified=False and verification_expires_at > now
+3. If found:
+   a. Save the chat_id from the update to Channel.chat_id
+   b. Try to resolve channel username if available
+   c. Set is_verified=True
+   d. Clear verification_code
+   e. Try to delete the verification message from the channel (bot must be admin)
+   f. Send a confirmation message to the channel: "✅ کانال با موفقیت به سامانه متصل شد"
+4. If not found or expired: ignore silently
+
+Also add APScheduler job to check every 60 seconds for expired unverified channels and clean them up.
+
+### Step 3 — Check Verification Status
+GET /api/publishing/channels/{id}/verify/status/
+- Return: { is_verified, verification_code (if still pending), expires_at, status }
+- Frontend polls this every 5 seconds while waiting
+
+### Step 4 — Manual re-verify
+POST /api/publishing/channels/{id}/verify/retry/
+- Reset verification_code and expiry, return new code
+
+---
+
+## CHANNEL MANAGEMENT APIs
+
+GET /api/publishing/channels/ — list all channels for workspace (filter by platform, is_verified)
+POST /api/publishing/channels/ — create new channel (starts verification flow automatically)
+GET /api/publishing/channels/{id}/ — get channel details + verification status
+DELETE /api/publishing/channels/{id}/ — soft delete (set is_active=False)
+POST /api/publishing/channels/{id}/test/ — send a test message to verify connection is still working
+
+---
+
+## PUBLISHING APIs
+
+### Immediate Publish
+POST /api/publishing/publish/now/
+- Request:
+  {
+    workspace_id,
+    content_id (optional — from Content model),
+    custom_text (optional — if no content_id),
+    media_urls (optional list of image URLs),
+    channel_ids (list of Channel IDs — can be multiple for simultaneous publish)
+  }
+- Create PublishJob with publish_type=immediate, status=processing
+- Create PublishResult records for each channel
+- For each channel, call the appropriate platform service (Telegram or Bale)
+- If content_id is provided, get text from Content.body
+- Support sending: text only, text+image, text+multiple images, text+file
+- Update each PublishResult with success/failed + platform_message_id
+- Update PublishJob status: published (if all success), failed (if all failed), or partial
+- Return: { job_id, results: [{channel_id, channel_name, status, error}] }
+
+### Scheduled Publish
+POST /api/publishing/publish/schedule/
+- Same as above but with scheduled_at datetime
+- Create PublishJob with publish_type=scheduled, status=pending
+- APScheduler will pick it up and execute at scheduled_at time
+- Return: { job_id, scheduled_at }
+
+### Cancel Scheduled Job
+POST /api/publishing/publish/{job_id}/cancel/
+- Only works if status=pending
+- Set status=cancelled
+
+### Publish History
+GET /api/publishing/history/
+- Filter by: workspace_id, channel_id, status, date_from, date_to
+- Return paginated list of PublishJobs with their PublishResults
+- Include: job_id, content title (if linked), target channels, status, scheduled_at, published_at
+
+GET /api/publishing/history/{job_id}/ — full detail of one job including per-channel results
+
+---
+
+## PLATFORM SERVICES
+
+Create publishing/services/ directory with:
+
+### telegram_service.py
+class TelegramService:
+  - Uses TELEGRAM_BOT_TOKEN from environment
+  - send_message(chat_id, text) → returns message_id
+  - send_photo(chat_id, text, photo_url) → returns message_id  
+  - send_media_group(chat_id, text, photo_urls list) → returns message_id
+  - send_document(chat_id, text, file_url) → returns message_id
+  - delete_message(chat_id, message_id) → bool
+  - get_chat(chat_id) → chat info dict
+  - All methods use requests library to call Telegram Bot API (api.telegram.org)
+  - Handle errors: raise PublishException with Persian message
+  - Log all API calls
+
+### bale_service.py
+class BaleService:
+  - Same interface as TelegramService
+  - Uses BALE_BOT_TOKEN from environment
+  - Bale Bot API base URL: https://tapi.bale.ai/bot{token}/
+  - Bale API is largely compatible with Telegram Bot API
+  - Same methods as TelegramService
+
+### publisher.py
+class PublisherService:
+  - publish(job: PublishJob) — main method, routes to correct platform service
+  - Determines platform from Channel.platform
+  - Handles retry logic: if fails, retry up to job.max_retries times with 30s delay
+  - Updates PublishJob and PublishResult status after each attempt
+  - Logs all errors to PublishJob.error_log
+
+---
+
+## APSCHEDULER JOBS
+
+Add these jobs to the existing APScheduler configuration:
+
+1. scheduled_publisher — runs every 60 seconds
+   - Query PublishJob where status=pending AND scheduled_at <= now
+   - For each job, call PublisherService.publish(job)
+
+2. cleanup_expired_verifications — runs every 5 minutes
+   - Delete or deactivate Channel records where is_verified=False AND verification_expires_at < now
+
+---
+
+## FRONTEND PAGES
+
+### 1. Channel Management Page
+URL: /publishing/channels/
+- List of connected channels in a card/table layout
+- Each card shows: platform icon (Telegram/Bale), channel name, channel type (channel/group), verification status badge (✅ تأیید شده / ⏳ در انتظار تأیید / ❌ تأیید نشده)
+- "افزودن کانال جدید" button → opens modal
+
+Add Channel Modal (multi-step):
+  Step 1 — Choose platform: Telegram / Bale (show icons)
+  Step 2 — Choose type: کانال یا گروه
+  Step 3 — Enter channel name (display name for the platform)
+  Step 4 — Show verification code in a big styled box with copy button
+           Show instructions in Persian
+           Show countdown timer (10 minutes)
+           Start polling /verify/status/ every 5 seconds
+           If verified: show success message, close modal, refresh list
+           If expired: show retry button
+
+"Test Connection" button on each verified channel → sends test message → shows success/fail toast
+
+### 2. Publish Page (انتشار محتوا)
+URL: /publishing/publish/
+- Two-column layout:
+
+LEFT COLUMN — Content Selection:
+  - Tabs: "از محتوای ذخیره‌شده" | "نوشتن مستقیم"
+  - Tab 1: searchable list of Content records (from Phase 2), click to select
+  - Tab 2: large text area to type directly
+  - Image attachment section: show existing GeneratedImages from Phase 2 OR upload new
+  - Preview area: shows how content will look
+
+RIGHT COLUMN — Publishing Options:
+  - Channel selector: multi-select list of verified channels with platform icons
+  - Publish time: radio buttons → "همین الان" | "زمان‌بندی"
+  - If scheduled: date + time picker (Persian calendar if possible, fallback to standard)
+  - "انتشار" button
+
+After clicking publish:
+  - Show loading state
+  - Show results per channel: ✅ یا ❌ با پیام خطا
+  - Option to retry failed channels
+
+### 3. Publish History Page (تاریخچه انتشار)
+URL: /publishing/history/
+- Filter bar: platform, channel, status, date range
+- Table columns: تاریخ | محتوا | کانال‌ها | وضعیت | جزئیات
+- Status badges: منتشر شد (green) | ناموفق (red) | در انتظار (yellow) | لغو شد (gray)
+- Click row → expand or modal showing per-channel results
+- Retry button for failed jobs
+
+### 4. Scheduled Queue Page (صف انتشار)
+URL: /publishing/queue/
+- List of pending scheduled jobs
+- Columns: زمان انتشار | محتوا | کانال‌ها | عملیات
+- Cancel button per job
+- Countdown to next publish
+
+---
+
+## NAVIGATION
+Add to existing sidebar:
+- انتشار (section header)
+  - کانال‌ها → /publishing/channels/
+  - انتشار محتوا → /publishing/publish/
+  - صف انتشار → /publishing/queue/
+  - تاریخچه → /publishing/history/
+
+---
+
+## ENVIRONMENT VARIABLES NEEDED
+Add these to .env.example (I will fill in the values):
+- TELEGRAM_BOT_TOKEN
+- BALE_BOT_TOKEN
+
+---
+
+## ERROR HANDLING
+- If bot token is missing: show Persian error "توکن ربات تنظیم نشده است"
+- If channel not admin: "ربات باید ادمین کانال باشد"
+- If publish fails: save error in PublishResult.error_message, show in UI
+- Network errors to Telegram/Bale API: retry up to 3 times
+- All exceptions must be caught and logged, never crash the main server
+
+---
+
+After implementing all of the above:
+1. Run migrations
+2. Confirm server starts without errors
+3. Confirm all new URLs registered
+4. Do NOT start bot polling automatically on server start — it should only run via: python manage.py run_bot_polling
