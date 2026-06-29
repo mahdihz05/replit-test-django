@@ -261,6 +261,71 @@ def suggest_hashtags(request, workspace_id):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def generate_summary(request, workspace_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+    cost = settings.WALLET_COSTS.get('content_rewrite', 5)
+    wallet, err = check_wallet(workspace_id, cost)
+    if err:
+        return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+    text = request.data.get('text', '')
+    result, error, tokens = openai_client.generate_summary(text, request.data.get('length', 'brief'))
+    if error:
+        return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    deduct_wallet(wallet, cost, 'خلاصه‌سازی متن')
+    return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_scenario(request, workspace_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+    cost = settings.WALLET_COSTS.get('text_generation', 10)
+    wallet, err = check_wallet(workspace_id, cost)
+    if err:
+        return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+    topic = request.data.get('topic', '')
+    result, error, tokens = openai_client.generate_scenario(
+        topic, request.data.get('platform', ''), request.data.get('goal', ''))
+    if error:
+        return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    deduct_wallet(wallet, cost, f'سناریو محتوا - {topic[:50]}')
+    return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_idea(request, workspace_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+    cost = settings.WALLET_COSTS.get('title_suggestions', 5)
+    wallet, err = check_wallet(workspace_id, cost)
+    if err:
+        return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+    niche = request.data.get('niche', '')
+    result, error, tokens = openai_client.generate_idea(
+        niche, request.data.get('platform', ''), int(request.data.get('count', 5)))
+    if error:
+        return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    deduct_wallet(wallet, cost, f'ایده محتوا - {niche[:50]}')
+    return Response({'success': True, 'data': {'ideas': result, 'tokens': tokens}})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def generate_cta(request, workspace_id):
     member = get_member(request.user, workspace_id)
     if not member:

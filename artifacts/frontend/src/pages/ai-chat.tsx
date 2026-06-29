@@ -1,129 +1,257 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
+import { apiFetch } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Bot, User, SendHorizontal, MessageSquare, Loader2, Sparkles } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Bot, User, SendHorizontal, MessageSquare, Loader2, Sparkles, Plus, Trash2 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Message {
   id: string;
-  role: "user" | "ai";
-  content: string;
+  role: "user" | "assistant";
+  body: string;
+  created_at: string;
+}
+
+interface Session {
+  id: string;
+  title: string;
+  updated_at: string;
 }
 
 export default function AiChat() {
-  const [messages, setMessages] = useState<Message[]>([
-    { id: "1", role: "ai", content: "سلام! من دستیار هوشمند شما هستم. چطور می‌توانم در تولید یا ویرایش محتوا به شما کمک کنم؟" }
-  ]);
+  const { selectedWorkspace } = useAuth();
+  const { toast } = useToast();
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeSession, setActiveSession] = useState<Session | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [loadingSessions, setLoadingSessions] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    
-    const newMsg: Message = { id: Date.now().toString(), role: "user", content: input };
-    setMessages(prev => [...prev, newMsg]);
+  useEffect(() => {
+    if (selectedWorkspace) fetchSessions();
+  }, [selectedWorkspace]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const fetchSessions = async () => {
+    setLoadingSessions(true);
+    try {
+      const response = await apiFetch(`/workspaces/${selectedWorkspace?.id}/ai/chat/sessions/`);
+      const list = Array.isArray(response) ? response : (response?.data ?? []);
+      setSessions(list);
+      if (list.length > 0 && !activeSession) {
+        loadSession(list[0]);
+      }
+    } catch {
+      setSessions([]);
+    } finally {
+      setLoadingSessions(false);
+    }
+  };
+
+  const loadSession = async (session: Session) => {
+    setActiveSession(session);
+    setLoadingMessages(true);
+    try {
+      const response = await apiFetch(`/workspaces/${selectedWorkspace?.id}/ai/chat/sessions/${session.id}/`);
+      const data = response?.data ?? response;
+      const msgs: Message[] = (data?.messages ?? []).map((m: any) => ({
+        id: m.id,
+        role: m.role,
+        body: m.body,
+        created_at: m.created_at,
+      }));
+      setMessages(msgs);
+    } catch {
+      setMessages([]);
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
+  const createNewSession = async () => {
+    try {
+      const response = await apiFetch(`/workspaces/${selectedWorkspace?.id}/ai/chat/sessions/`, {
+        method: "POST",
+        data: {}
+      });
+      const session = response?.data ?? response;
+      setSessions(prev => [session, ...prev]);
+      setActiveSession(session);
+      setMessages([]);
+    } catch (error: any) {
+      toast({ title: "خطا", description: error.message || "خطا در ایجاد گفتگو", variant: "destructive" });
+    }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || !activeSession) return;
+
+    const userMsg: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      body: input,
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+    const sentInput = input;
     setInput("");
-    setLoading(true);
+    setSending(true);
 
-    // Mock response
-    setTimeout(() => {
+    try {
+      const response = await apiFetch(
+        `/workspaces/${selectedWorkspace?.id}/ai/chat/sessions/${activeSession.id}/messages/`,
+        { method: "POST", data: { message: sentInput } }
+      );
+      const aiMsg = response?.data ?? response;
       setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: "ai",
-        content: "البته! من می‌توانم متن شما را به صورت حرفه‌ای بازنویسی کنم یا ایده‌های جدیدی برای شبکه‌های اجتماعی پیشنهاد دهم."
+        id: aiMsg.id ?? (Date.now() + 1).toString(),
+        role: "assistant",
+        body: aiMsg.body,
+        created_at: aiMsg.created_at ?? new Date().toISOString(),
       }]);
-      setLoading(false);
-    }, 1500);
+      setSessions(prev => prev.map(s =>
+        s.id === activeSession.id
+          ? { ...s, title: s.title === "New Chat" ? sentInput.slice(0, 40) : s.title }
+          : s
+      ));
+    } catch (error: any) {
+      toast({ title: "خطا", description: error.message || "خطا در ارسال پیام", variant: "destructive" });
+      setMessages(prev => prev.filter(m => m.id !== userMsg.id));
+      setInput(sentInput);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
-    <div className="h-[calc(100vh-10rem)] flex flex-col md:flex-row gap-6">
-      {/* Sessions Sidebar - hidden on mobile */}
-      <Card className="hidden md:flex flex-col w-64 shrink-0 bg-muted/20">
-        <div className="p-4 border-b border-border">
-          <Button className="w-full gap-2">
-            <MessageSquare className="w-4 h-4" /> گفتگوی جدید
+    <div className="h-[calc(100vh-10rem)] flex flex-col md:flex-row gap-4">
+      <Card className="hidden md:flex flex-col w-64 shrink-0 overflow-hidden">
+        <div className="p-3 border-b">
+          <Button className="w-full gap-2" size="sm" onClick={createNewSession}>
+            <Plus className="w-4 h-4" /> گفتگوی جدید
           </Button>
         </div>
         <ScrollArea className="flex-1">
-          <div className="p-2 space-y-1">
-            {[1, 2, 3].map(i => (
-              <div key={i} className={`p-3 text-sm rounded-md cursor-pointer transition-colors ${i === 1 ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted'}`}>
-                {i === 1 ? 'ایده پست اینستاگرام' : i === 2 ? 'بازنویسی مقاله' : 'کپشن تلگرام'}
-              </div>
-            ))}
-          </div>
+          {loadingSessions ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">در حال بارگذاری...</div>
+          ) : sessions.length === 0 ? (
+            <div className="p-4 text-center text-sm text-muted-foreground">گفتگویی وجود ندارد</div>
+          ) : (
+            <div className="p-2 space-y-1">
+              {sessions.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => loadSession(s)}
+                  className={`w-full text-right p-2.5 text-sm rounded-md transition-colors truncate ${
+                    activeSession?.id === s.id
+                      ? "bg-primary/10 text-primary font-medium"
+                      : "hover:bg-muted text-foreground/70"
+                  }`}
+                >
+                  <MessageSquare className="w-3.5 h-3.5 inline ml-2 opacity-60" />
+                  {s.title || "گفتگوی جدید"}
+                </button>
+              ))}
+            </div>
+          )}
         </ScrollArea>
       </Card>
 
-      {/* Chat Area */}
-      <Card className="flex-1 flex flex-col overflow-hidden shadow-sm border-primary/10">
-        <div className="p-4 border-b border-border bg-card flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-            <Sparkles className="w-5 h-5 text-primary" />
+      <Card className="flex-1 flex flex-col overflow-hidden">
+        <div className="p-4 border-b flex items-center gap-3 shrink-0">
+          <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center">
+            <Sparkles className="w-4 h-4 text-primary" />
           </div>
           <div>
-            <h2 className="font-semibold">دستیار خلاق محتوا</h2>
-            <p className="text-xs text-muted-foreground">پاسخگویی سریع بر پایه GPT-4</p>
+            <h2 className="font-semibold text-sm">دستیار هوشمند محتوا</h2>
+            <p className="text-xs text-muted-foreground">GPT-4o · فارسی و انگلیسی</p>
+          </div>
+          <div className="mr-auto md:hidden">
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={createNewSession}>
+              <Plus className="w-3.5 h-3.5" /> جدید
+            </Button>
           </div>
         </div>
 
-        <ScrollArea className="flex-1 p-4 bg-muted/5">
-          <div className="space-y-6 max-w-3xl mx-auto py-4">
+        <ScrollArea className="flex-1 p-4">
+          <div className="space-y-5 max-w-3xl mx-auto py-2">
+            {!activeSession && !loadingSessions && (
+              <div className="text-center py-16 text-muted-foreground">
+                <Bot className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                <p className="text-sm">یک گفتگوی جدید شروع کنید</p>
+                <Button className="mt-4 gap-2" size="sm" onClick={createNewSession}>
+                  <Plus className="w-4 h-4" /> شروع گفتگو
+                </Button>
+              </div>
+            )}
+            {loadingMessages && (
+              <div className="text-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" />
+              </div>
+            )}
             {messages.map(msg => (
-              <div key={msg.id} className={`flex gap-4 ${msg.role === "ai" ? "" : "flex-row-reverse"}`}>
+              <div key={msg.id} className={`flex gap-3 ${msg.role === "assistant" ? "" : "flex-row-reverse"}`}>
                 <div className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center mt-1 ${
-                  msg.role === "ai" ? "bg-primary/20 text-primary" : "bg-secondary text-secondary-foreground"
+                  msg.role === "assistant" ? "bg-primary/10 text-primary" : "bg-secondary"
                 }`}>
-                  {msg.role === "ai" ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                  {msg.role === "assistant" ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
                 </div>
-                <div className={`px-4 py-3 rounded-2xl max-w-[85%] text-sm leading-relaxed ${
-                  msg.role === "ai" 
-                    ? "bg-card border shadow-sm rounded-tr-sm" 
+                <div className={`px-4 py-3 rounded-2xl max-w-[85%] text-sm leading-relaxed whitespace-pre-wrap ${
+                  msg.role === "assistant"
+                    ? "bg-card border shadow-sm rounded-tr-sm"
                     : "bg-primary text-primary-foreground rounded-tl-sm"
                 }`}>
-                  {msg.content}
+                  {msg.body}
                 </div>
               </div>
             ))}
-            {loading && (
-              <div className="flex gap-4">
-                <div className="w-8 h-8 shrink-0 rounded-full bg-primary/20 text-primary flex items-center justify-center mt-1">
-                  <Bot className="w-4 h-4" />
+            {sending && (
+              <div className="flex gap-3">
+                <div className="w-8 h-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Bot className="w-4 h-4 text-primary" />
                 </div>
-                <div className="px-4 py-3 bg-card border shadow-sm rounded-2xl rounded-tr-sm flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: "0ms" }}></span>
-                  <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: "150ms" }}></span>
-                  <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: "300ms" }}></span>
+                <div className="px-4 py-3 bg-card border shadow-sm rounded-2xl rounded-tr-sm flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1.5 h-1.5 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                 </div>
               </div>
             )}
+            <div ref={bottomRef} />
           </div>
         </ScrollArea>
 
-        <div className="p-4 bg-card border-t border-border">
-          <div className="max-w-3xl mx-auto relative flex items-center">
-            <Input 
-              placeholder="درخواست خود را بنویسید..." 
-              className="pr-4 pl-14 py-6 rounded-full bg-muted/50 border-transparent focus-visible:bg-background focus-visible:border-primary"
+        <div className="p-4 border-t bg-card shrink-0">
+          <div className="max-w-3xl mx-auto flex items-center gap-2">
+            <Input
+              placeholder={activeSession ? "پیام خود را بنویسید..." : "ابتدا یک گفتگو شروع کنید"}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+              disabled={sending || !activeSession}
+              className="flex-1 rounded-full bg-muted/50 border-transparent focus-visible:bg-background focus-visible:border-primary"
             />
-            <Button 
-              size="icon" 
-              className="absolute left-1.5 rounded-full w-9 h-9" 
+            <Button
+              size="icon"
+              className="rounded-full shrink-0"
               onClick={handleSend}
-              disabled={loading || !input.trim()}
+              disabled={sending || !input.trim() || !activeSession}
             >
               <SendHorizontal className="w-4 h-4 rtl:-scale-x-100" />
             </Button>
           </div>
-          <div className="text-center mt-2">
-            <span className="text-[10px] text-muted-foreground">هوش مصنوعی ممکن است اشتباه کند. اطلاعات را بررسی کنید.</span>
-          </div>
+          <p className="text-center mt-2 text-[10px] text-muted-foreground">
+            هوش مصنوعی ممکن است اشتباه کند. اطلاعات را بررسی کنید.
+          </p>
         </div>
       </Card>
     </div>

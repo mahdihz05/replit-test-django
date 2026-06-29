@@ -13,6 +13,8 @@ import Contents from "@/pages/contents";
 import ContentNew from "@/pages/contents-new";
 import ContentDetail from "@/pages/contents-detail";
 import AiChat from "@/pages/ai-chat";
+import AiGenerate from "@/pages/ai-generate";
+import AiImages from "@/pages/ai-images";
 import Channels from "@/pages/channels";
 import Publish from "@/pages/publish";
 import Wallet from "@/pages/wallet";
@@ -37,6 +39,8 @@ function Router() {
         <Route path="/contents/new" component={ContentNew} />
         <Route path="/contents/:id" component={ContentDetail} />
         <Route path="/ai" component={AiChat} />
+        <Route path="/ai/generate" component={AiGenerate} />
+        <Route path="/ai/images" component={AiImages} />
         <Route path="/channels" component={Channels} />
         <Route path="/publish" component={Publish} />
         <Route path="/wallet" component={Wallet} />

@@ -1,0 +1,248 @@
+We are continuing development of our AI Content Automation Platform (Django backend + HTML/JS frontend). Phase 1 is complete and working: OTP authentication, Workspace management, and User management.
+
+Now implement Phase 2: AI Content Engine (موتور هوشمند تولید محتوا).
+
+---
+
+## IMPORTANT RULES
+- Do NOT break any existing Phase 1 functionality
+- Write complete, working code for every file — no placeholders, no "TODO", no truncation
+- For OpenAI API Key: use environment variable OPENAI_API_KEY (I will set it myself)
+- All AI calls use OpenAI API (gpt-4o for text, dall-e-3 for images)
+- All text responses from AI must support Persian (Farsi) language
+- Follow the same code style, folder structure, and conventions already in the project
+- Every feature must be scoped to the user's active Workspace (multi-tenant isolation)
+
+---
+
+## DATABASE MODELS
+
+Create or update the following models (use UUID primary keys, soft delete via is_active, add workspace FK to all models):
+
+### Content Model
+- id (UUID, primary key)
+- workspace (FK to Workspace)
+- created_by (FK to User)
+- title (CharField)
+- body (TextField) — the main generated/edited text
+- content_type (CharField with choices: text, scenario, rewrite, summary, title, cta, hashtag, idea)
+- status (CharField with choices: draft, published, archived)
+- ai_model_used (CharField) — which OpenAI model was used
+- prompt_used (TextField) — store the original prompt
+- version (IntegerField, default=1)
+- tags (ManyToMany or JSONField)
+- is_active (BooleanField, default=True) — soft delete
+- created_at, updated_at (auto timestamps)
+
+### ContentVersion Model (for version history)
+- id (UUID)
+- content (FK to Content)
+- version_number (IntegerField)
+- body (TextField)
+- changed_by (FK to User)
+- created_at
+
+### GeneratedImage Model
+- id (UUID)
+- workspace (FK to Workspace)
+- created_by (FK to User)
+- prompt (TextField)
+- image_url (CharField) — URL returned by DALL-E
+- local_path (CharField, nullable) — if saved locally
+- ai_model_used (CharField)
+- is_active (BooleanField)
+- created_at
+
+### AIConversation Model (for smart chat feature)
+- id (UUID)
+- workspace (FK to Workspace)
+- user (FK to User)
+- title (CharField)
+- messages (JSONField) — store full conversation history as list of {role, content}
+- is_active (BooleanField)
+- created_at, updated_at
+
+Run migrations after creating models.
+
+---
+
+## BACKEND — Django APIs
+
+Create a new Django app called `content` (if not already existing).
+
+### 1. Smart Chat with AI (گفتگوی هوشمند)
+POST /api/content/chat/
+- Request: { conversation_id (optional), message, workspace_id }
+- If no conversation_id, create new AIConversation
+- Append user message to messages history
+- Send full history to OpenAI gpt-4o with system prompt: "You are an expert Persian content creator assistant. Help users create high-quality content for social media, websites, and marketing channels."
+- Append AI response to history, save to DB
+- Return: { conversation_id, reply, messages_history }
+
+GET /api/content/chat/ — list user's conversations (for this workspace)
+GET /api/content/chat/{id}/ — get full conversation with messages
+DELETE /api/content/chat/{id}/ — soft delete
+
+### 2. Text Generation Tools
+All endpoints below follow this pattern:
+- POST request with { prompt, workspace_id, extra_params }
+- Call OpenAI gpt-4o with appropriate system prompt
+- Save result as Content object in DB
+- Return { content_id, result_text }
+
+Endpoints:
+- POST /api/content/generate/text/ — general text generation
+  - params: { topic, tone (formal/casual/friendly), length (short/medium/long), language (default: Persian) }
+  
+- POST /api/content/generate/scenario/ — content scenario/script
+  - params: { topic, platform (telegram/instagram/website), goal }
+  
+- POST /api/content/generate/rewrite/ — rewrite existing text
+  - params: { original_text, tone, instructions }
+  
+- POST /api/content/generate/summary/ — summarize text
+  - params: { original_text, length (brief/detailed) }
+  
+- POST /api/content/generate/title/ — generate titles/headlines
+  - params: { topic, count (default 5), style }
+  
+- POST /api/content/generate/cta/ — generate Call-To-Action
+  - params: { product_or_service, goal, platform }
+  
+- POST /api/content/generate/hashtag/ — generate hashtags
+  - params: { topic, platform, count (default 10), language }
+  
+- POST /api/content/generate/idea/ — generate content ideas
+  - params: { niche, count (default 5), platform }
+
+### 3. Image Generation
+POST /api/content/generate/image/
+- params: { prompt, size (1024x1024 / 1792x1024 / 1024x1792), style (vivid/natural), workspace_id }
+- Call DALL-E 3 via OpenAI API
+- Save result to GeneratedImage model
+- Return { image_id, image_url, prompt_used }
+
+GET /api/content/images/ — list workspace images (paginated)
+DELETE /api/content/images/{id}/ — soft delete
+
+### 4. Content Management (CRUD)
+GET /api/content/ — list all content for workspace (filter by status, content_type, search by title)
+POST /api/content/ — create content manually
+GET /api/content/{id}/ — get single content with version history
+PUT /api/content/{id}/ — update content (auto-create new ContentVersion before saving)
+DELETE /api/content/{id}/ — soft delete (set is_active=False)
+
+POST /api/content/{id}/archive/ — set status to archived
+POST /api/content/{id}/restore/ — restore from archived
+
+GET /api/content/{id}/versions/ — list all versions
+POST /api/content/{id}/versions/{version_id}/restore/ — restore a specific version as current
+
+### 5. Search
+GET /api/content/search/?q=keyword&workspace_id=xxx
+- Search in title and body fields
+- Filter by content_type and status
+- Return paginated results
+
+---
+
+## FRONTEND — HTML Pages
+
+Create the following pages under the existing template structure:
+
+### 1. Content Dashboard (محتوا)
+URL: /content/
+- Show stats: total content, drafts, published, archived
+- Recent content list with title, type, status, date
+- Quick action buttons: New Chat, Generate Text, Generate Image
+
+### 2. AI Chat Page (گفتگوی هوشمند)
+URL: /content/chat/
+- Left sidebar: list of conversations + "New Chat" button
+- Main area: chat bubble UI (user messages right-aligned, AI messages left-aligned)
+- Input box at bottom with Send button
+- Show loading spinner while waiting for AI response
+- Auto-scroll to latest message
+- RTL layout for Persian text
+
+### 3. Content Generation Tools Page
+URL: /content/generate/
+- Tabbed interface with tabs: متن | سناریو | بازنویسی | خلاصه | عنوان | CTA | هشتگ | ایده
+- Each tab shows a form appropriate to that tool (based on the params listed above)
+- Tone selector: رسمی / دوستانه / غیررسمی
+- Length selector where applicable
+- "Generate" button → show loading → display result in a text area below
+- "Save to Content" button to save result
+- "Copy" button to copy text to clipboard
+
+### 4. Image Generation Page
+URL: /content/images/generate/
+- Prompt text area (large)
+- Size selector (square / landscape / portrait)
+- Style selector (vivid / natural)
+- Generate button → show loading → display generated image
+- Save button → saves to gallery
+- Image gallery below showing all workspace images (grid layout)
+
+### 5. Content List Page
+URL: /content/list/
+- Filterable table: All / Drafts / Published / Archived
+- Search bar
+- Columns: Title, Type, Status, Created By, Date, Actions
+- Actions: View, Edit, Archive, Delete
+- Pagination
+
+### 6. Content Editor Page
+URL: /content/{id}/edit/
+- Title field
+- Rich text area for body (use a simple textarea, no need for complex editor)
+- Content type badge
+- Version history sidebar (show list of previous versions with restore button)
+- Save button (auto-creates version)
+- Status change dropdown
+
+---
+
+## NAVIGATION
+Add the following items to the existing sidebar navigation:
+- محتوا (Content Dashboard) → /content/
+- گفتگوی هوشمند → /content/chat/
+- تولید محتوا → /content/generate/
+- تولید تصویر → /content/images/generate/
+- لیست محتوا → /content/list/
+
+---
+
+## OPENAI INTEGRATION
+
+Create a service class in content/services/openai_service.py:
+
+class OpenAIService:
+    - __init__: load API key from environment (OPENAI_API_KEY)
+    - generate_text(prompt, system_prompt, model="gpt-4o", max_tokens=2000) → returns string
+    - generate_image(prompt, size, style) → returns image_url string
+    - chat_completion(messages_history, system_prompt) → returns assistant reply string
+    - All methods must handle API errors gracefully and raise custom exceptions with Persian error messages
+
+---
+
+## ERROR HANDLING
+- All API errors from OpenAI must return proper JSON error responses
+- Show Persian error messages in the UI
+- If OpenAI API key is missing or invalid, show clear message: "کلید API هوش مصنوعی تنظیم نشده است"
+- Use try/except on all OpenAI calls with logging
+
+---
+
+## PERMISSIONS
+- All content endpoints require authentication
+- Content is always scoped to workspace — users can only see/edit content in their own workspace
+- Reuse the existing permission system from Phase 1
+
+---
+
+After implementing all of the above:
+1. Run migrations
+2. Make sure the development server starts without errors
+3. Confirm all new URLs are registered in urls.py
+4. Add OPENAI_API_KEY to the list of required environment variables in README or .env.example

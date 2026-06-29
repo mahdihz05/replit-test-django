@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { 
   LayoutDashboard, FileText, Bot, Share2, 
   SendHorizontal, Wallet, BarChart3, Users, 
-  Settings, LogOut, ChevronDown, Menu
+  Settings, LogOut, ChevronDown, Menu, Wand2, ImageIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +20,9 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 const NAV_ITEMS = [
   { href: "/", label: "داشبورد", icon: LayoutDashboard },
   { href: "/contents", label: "محتوا", icon: FileText },
-  { href: "/ai", label: "هوش مصنوعی", icon: Bot },
+  { href: "/ai", label: "گفتگوی هوشمند", icon: Bot },
+  { href: "/ai/generate", label: "تولید محتوا", icon: Wand2 },
+  { href: "/ai/images", label: "تولید تصویر", icon: ImageIcon },
   { href: "/channels", label: "کانال‌ها", icon: Share2 },
   { href: "/publish", label: "انتشار", icon: SendHorizontal },
   { href: "/wallet", label: "کیف پول", icon: Wallet },

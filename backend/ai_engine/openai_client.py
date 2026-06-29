@@ -163,6 +163,65 @@ def generate_image(description, style=''):
         return None, str(e)
 
 
+def generate_summary(text, length='brief'):
+    client = get_openai_client()
+    if not client or not settings.OPENAI_API_KEY:
+        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
+    length_fa = 'کوتاه و فشرده' if length == 'brief' else 'جامع و کامل'
+    try:
+        response = client.chat.completions.create(
+            model='gpt-4o',
+            messages=[
+                {'role': 'system', 'content': 'You are an expert Persian content summarizer.'},
+                {'role': 'user', 'content': f'این متن را به صورت {length_fa} خلاصه کن:\n\n{text}'}
+            ]
+        )
+        result = response.choices[0].message.content
+        tokens = response.usage.total_tokens
+        return result, None, tokens
+    except Exception as e:
+        return None, str(e), 0
+
+
+def generate_scenario(topic, platform='', goal=''):
+    client = get_openai_client()
+    if not client or not settings.OPENAI_API_KEY:
+        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
+    try:
+        response = client.chat.completions.create(
+            model='gpt-4o',
+            messages=[
+                {'role': 'system', 'content': 'You are an expert Persian content strategist and scriptwriter.'},
+                {'role': 'user', 'content': f'یک سناریوی محتوایی کامل بنویس:\nموضوع: {topic}\nپلتفرم: {platform}\nهدف: {goal}\n\nشامل: هوک ابتدایی، بدنه اصلی، و call-to-action باشد.'}
+            ]
+        )
+        result = response.choices[0].message.content
+        tokens = response.usage.total_tokens
+        return result, None, tokens
+    except Exception as e:
+        return None, str(e), 0
+
+
+def generate_idea(niche, platform='', count=5):
+    client = get_openai_client()
+    if not client or not settings.OPENAI_API_KEY:
+        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
+    try:
+        response = client.chat.completions.create(
+            model='gpt-4o',
+            messages=[
+                {'role': 'system', 'content': 'You are an expert Persian content idea generator.'},
+                {'role': 'user', 'content': f'{count} ایده خلاقانه برای تولید محتوا پیشنهاد بده:\nحوزه: {niche}\nپلتفرم: {platform}\n\nهر ایده را با یک جمله توضیح بده.'}
+            ]
+        )
+        text = response.choices[0].message.content
+        ideas = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
+        tokens = response.usage.total_tokens
+        return ideas, None, tokens
+    except Exception as e:
+        return None, str(e), 0
+
+
 def chat_completion(messages):
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:

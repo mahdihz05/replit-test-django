@@ -1,0 +1,151 @@
+import { useState } from "react";
+import { useAuth } from "@/lib/auth";
+import { apiFetch } from "@/lib/api";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { ImageIcon, Loader2, Download, Wand2 } from "lucide-react";
+
+export default function AiImages() {
+  const { selectedWorkspace } = useAuth();
+  const { toast } = useToast();
+  const [prompt, setPrompt] = useState("");
+  const [style, setStyle] = useState("vivid");
+  const [loading, setLoading] = useState(false);
+  const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
+  const [history, setHistory] = useState<{ url: string; prompt: string }[]>([]);
+
+  const handleGenerate = async () => {
+    if (!prompt.trim() || !selectedWorkspace) return;
+    setLoading(true);
+    setGeneratedUrl(null);
+    try {
+      const response = await apiFetch(`/workspaces/${selectedWorkspace.id}/ai/generate/image/`, {
+        method: "POST",
+        data: { description: prompt, style }
+      });
+      const url = response?.data?.image_url ?? response?.image_url;
+      if (url) {
+        setGeneratedUrl(url);
+        setHistory(prev => [{ url, prompt }, ...prev.slice(0, 11)]);
+      }
+    } catch (error: any) {
+      toast({ title: "خطا", description: error.message || "خطا در تولید تصویر", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = (url: string) => {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ai-image.png";
+    a.target = "_blank";
+    a.click();
+  };
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">تولید تصویر با هوش مصنوعی</h1>
+        <p className="text-muted-foreground mt-1">با DALL-E 3 تصاویر خلاقانه بسازید</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">توضیح تصویر</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Textarea
+              placeholder="مثال: یک فنجان قهوه روی میز چوبی کنار پنجره، نور طلایی غروب آفتاب، عکاسی حرفه‌ای..."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              className="min-h-[140px] text-sm"
+            />
+            <div>
+              <label className="text-sm font-medium block mb-1.5">سبک تصویر</label>
+              <Select value={style} onValueChange={setStyle}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="vivid">پرجنب‌وجوش (Vivid)</SelectItem>
+                  <SelectItem value="natural">طبیعی (Natural)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-xs text-amber-800 dark:text-amber-400">
+              ⚠️ هر بار تولید تصویر کردیت از کیف پول کسر می‌شود
+            </div>
+            <Button
+              className="w-full gap-2"
+              size="lg"
+              onClick={handleGenerate}
+              disabled={loading || !prompt.trim()}
+            >
+              {loading
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> در حال تولید تصویر...</>
+                : <><Wand2 className="w-4 h-4" /> تولید تصویر</>
+              }
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">تصویر تولید شده</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading && (
+              <div className="flex flex-col items-center justify-center h-64 gap-4 text-muted-foreground">
+                <Loader2 className="w-10 h-10 animate-spin text-primary" />
+                <p className="text-sm">در حال تولید تصویر... (معمولاً ۱۵-۳۰ ثانیه)</p>
+              </div>
+            )}
+            {!loading && !generatedUrl && (
+              <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed rounded-lg gap-3 text-muted-foreground">
+                <ImageIcon className="w-12 h-12 opacity-20" />
+                <p className="text-sm">تصویر اینجا نمایش داده می‌شود</p>
+              </div>
+            )}
+            {!loading && generatedUrl && (
+              <div className="space-y-3">
+                <img
+                  src={generatedUrl}
+                  alt="تصویر تولید شده"
+                  className="w-full rounded-lg border shadow-sm object-cover"
+                />
+                <Button
+                  variant="outline"
+                  className="w-full gap-2"
+                  onClick={() => handleDownload(generatedUrl)}
+                >
+                  <Download className="w-4 h-4" /> دانلود تصویر
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {history.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold mb-4">تاریخچه تصاویر</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            {history.map((item, i) => (
+              <div key={i} className="group relative rounded-lg overflow-hidden border shadow-sm cursor-pointer" onClick={() => setGeneratedUrl(item.url)}>
+                <img src={item.url} alt={item.prompt} className="w-full aspect-square object-cover" />
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
+                  <p className="text-white text-xs line-clamp-2">{item.prompt}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
