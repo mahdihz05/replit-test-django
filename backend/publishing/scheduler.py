@@ -25,7 +25,7 @@ def poll_telegram():
         resp = req_lib.get(url, params={
             'offset': _offsets['telegram'],
             'timeout': 0,
-            'allowed_updates': ['message'],
+            'allowed_updates': ['message', 'channel_post'],
         }, timeout=8)
         if not resp.ok:
             return
@@ -34,11 +34,15 @@ def poll_telegram():
             return
         for update in data.get('result', []):
             _offsets['telegram'] = update['update_id'] + 1
-            msg = update.get('message', {})
+            # Telegram sends channel posts as 'channel_post', group messages as 'message'
+            msg = update.get('message') or update.get('channel_post', {})
+            if not msg:
+                continue
             text = msg.get('text', '') or ''
             chat = msg.get('chat', {})
             match = VERIFY_PATTERN.search(text)
             if match:
+                logger.info(f'[poll_telegram] Found verification code {match.group()} in chat {chat.get("id")} (type: {chat.get("type")})')
                 _process_code(
                     code=match.group(),
                     chat_id=str(chat.get('id', '')),
