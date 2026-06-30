@@ -5,7 +5,7 @@
 ## Run & Operate
 
 - `python /home/runner/workspace/backend/manage.py runserver 0.0.0.0:8000` — Django API (port 8000)
-- `pnpm --filter @workspace/frontend run dev` — React Vite frontend (port 18130)
+- `pnpm --filter @workspace/frontend run dev` — React Vite frontend (port 5173)
 - `cd backend && python manage.py makemigrations` — create migrations
 - `cd backend && python manage.py migrate` — apply migrations
 

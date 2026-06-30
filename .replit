@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "python-3.11", "web"]
+modules = ["nodejs-20", "python-3.11", "web", "postgresql-16"]
 
 [deployment]
 router = "application"
@@ -45,6 +45,3 @@ channel = "stable-25_05"
 packages = ["freetype", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "tcl", "tk", "zlib"]
 
 [userenv]
-
-[userenv.shared]
-TELEGRAM_BOT_TOKEN = "8960877163:AAFhOCBIBAodvSXXJQ8eBFhMljWJc7E8e3Y"
