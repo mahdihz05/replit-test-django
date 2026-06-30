@@ -12,10 +12,8 @@ class ConfigAppConfig(AppConfig):
         except Exception as e:
             print(f'[Scheduler] Could not start: {e}')
 
-        import os
-        if os.environ.get('RUN_MAIN') == 'true':
-            try:
-                from bots.telegram_bot import start_bot
-                start_bot()
-            except Exception as e:
-                print(f'[Bot] Could not start: {e}')
+        # NOTE: Telegram polling is handled exclusively by the APScheduler job
+        # (poll_telegram in publishing/scheduler.py). Running both the library-based
+        # bot (python-telegram-bot Application) and the scheduler's manual getUpdates
+        # at the same time causes a race condition where they steal updates from each
+        # other, so the library-based bot is disabled here.
