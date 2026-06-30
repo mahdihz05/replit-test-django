@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (token) {
         try {
           const userData = await apiFetch("/auth/me/");
-          setUser(userData);
+          setUser(userData?.data ?? userData);
           await refreshWorkspaces();
         } catch (error) {
           removeToken();

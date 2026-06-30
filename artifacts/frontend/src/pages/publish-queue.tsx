@@ -46,7 +46,7 @@ export default function PublishQueue() {
   const { selectedWorkspace } = useAuth();
   const { toast } = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   const fetchJobs = async () => {

@@ -25,7 +25,7 @@ interface Content {
 export default function Contents() {
   const { selectedWorkspace } = useAuth();
   const [contents, setContents] = useState<Content[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
 
   useEffect(() => {

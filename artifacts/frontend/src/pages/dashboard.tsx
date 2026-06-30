@@ -14,7 +14,7 @@ export default function Dashboard() {
     aiCredits: 0,
     activeChannels: 0,
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (selectedWorkspace) {

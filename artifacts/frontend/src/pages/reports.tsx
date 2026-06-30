@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
 
 export default function Reports() {
   const { selectedWorkspace } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const dataStatus = [
     { name: 'منتشر شده', value: 45, color: 'hsl(var(--chart-1))' },

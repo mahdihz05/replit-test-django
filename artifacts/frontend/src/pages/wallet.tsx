@@ -10,7 +10,7 @@ export default function Wallet() {
   const { selectedWorkspace } = useAuth();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [balance, setBalance] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (selectedWorkspace) {

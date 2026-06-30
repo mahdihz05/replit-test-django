@@ -11,7 +11,7 @@ import { Trash2, Plus, UserPlus } from "lucide-react";
 export default function Members() {
   const { selectedWorkspace } = useAuth();
   const [members, setMembers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (selectedWorkspace) {

@@ -146,7 +146,7 @@ export default function PublishHistory() {
   const { selectedWorkspace } = useAuth();
   const { toast } = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const fetchHistory = async () => {
