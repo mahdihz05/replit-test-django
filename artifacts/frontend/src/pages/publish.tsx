@@ -51,7 +51,7 @@ export default function Publish() {
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [contents, setContents] = useState<Content[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  const [loadingData, setLoadingData] = useState(false);
 
   const [contentTab, setContentTab] = useState<"saved" | "direct">("saved");
   const [contentSearch, setContentSearch] = useState("");

@@ -12,7 +12,7 @@ export default function ContentDetail() {
   const { selectedWorkspace } = useAuth();
   const [content, setContent] = useState<any>(null);
   const [versions, setVersions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (selectedWorkspace && params?.id) {

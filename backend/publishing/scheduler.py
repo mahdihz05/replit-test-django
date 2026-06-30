@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 # In-memory offset tracking for bot getUpdates (resets on restart, which is fine)
 _offsets = {'telegram': 0, 'bale': 0}
+_started = False
 
 VERIFY_PATTERN = re.compile(r'VRF-[A-Z0-9]{8}')
 
@@ -261,6 +262,9 @@ def expire_verifications():
 # ─────────────────────────────────────────────
 
 def start_scheduler():
+    global _started
+    if _started:
+        return None
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.interval import IntervalTrigger
@@ -281,6 +285,7 @@ def start_scheduler():
         scheduler.add_job(expire_verifications, IntervalTrigger(hours=1), id='expire_verifications')
 
         scheduler.start()
+        _started = True
         print('[Scheduler] Started — bot polling active (every 5s)')
         return scheduler
     except Exception as e:

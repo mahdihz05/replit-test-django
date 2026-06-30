@@ -6,14 +6,15 @@ class ConfigAppConfig(AppConfig):
     name = 'config'
 
     def ready(self):
+        # Only run background workers in the main Django process, not in the
+        # autoreloader parent process. This prevents duplicate APScheduler instances
+        # during development (runserver with autoreload).
+        import os
+        if os.environ.get('RUN_MAIN') != 'true':
+            return
+
         try:
             from publishing.scheduler import start_scheduler
             start_scheduler()
         except Exception as e:
             print(f'[Scheduler] Could not start: {e}')
-
-        # NOTE: Telegram polling is handled exclusively by the APScheduler job
-        # (poll_telegram in publishing/scheduler.py). Running both the library-based
-        # bot (python-telegram-bot Application) and the scheduler's manual getUpdates
-        # at the same time causes a race condition where they steal updates from each
-        # other, so the library-based bot is disabled here.
