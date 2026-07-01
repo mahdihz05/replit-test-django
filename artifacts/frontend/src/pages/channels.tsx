@@ -147,7 +147,7 @@ export default function Channels() {
           toast({ title: "کد منقضی شد", description: "کد تأیید منقضی شد. مجدد تلاش کنید.", variant: "destructive" });
         }
       } catch {}
-    }, 5000);
+    }, 1000);
   };
 
   useEffect(() => () => stopPolling(), []);

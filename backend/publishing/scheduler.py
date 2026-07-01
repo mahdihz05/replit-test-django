@@ -1,4 +1,6 @@
+import os
 import re
+import fcntl
 import logging
 import requests as req_lib
 from datetime import timedelta
@@ -10,8 +12,11 @@ logger = logging.getLogger(__name__)
 # In-memory offset tracking for bot getUpdates (resets on restart, which is fine)
 _offsets = {'telegram': 0, 'bale': 0}
 _started = False
+_lock_fd = None
 
 VERIFY_PATTERN = re.compile(r'VRF-[A-Z0-9]{8}')
+
+LOCK_FILE_PATH = '/tmp/mohtavayar_scheduler.lock'
 
 # ─────────────────────────────────────────────
 # Bot polling — Telegram
@@ -22,12 +27,16 @@ def poll_telegram():
     if not token:
         return
     try:
+        # Long-poll Telegram for up to 5 seconds. When a new message arrives,
+        # Telegram returns immediately; otherwise it waits ~5s, then we retry.
+        # This avoids overlapping short-poll requests when network latency is high.
+        long_poll_timeout = 5
         url = f'https://api.telegram.org/bot{token}/getUpdates'
         resp = req_lib.get(url, params={
             'offset': _offsets['telegram'],
-            'timeout': 0,
+            'timeout': long_poll_timeout,
             'allowed_updates': ['message', 'channel_post'],
-        }, timeout=8)
+        }, timeout=long_poll_timeout + 5)
         if not resp.ok:
             return
         data = resp.json()
@@ -43,7 +52,10 @@ def poll_telegram():
             chat = msg.get('chat', {})
             match = VERIFY_PATTERN.search(text)
             if match:
-                logger.info(f'[poll_telegram] Found verification code {match.group()} in chat {chat.get("id")} (type: {chat.get("type")})')
+                logger.info(
+                    '[poll_telegram] Found verification code %s in chat %s (type: %s)',
+                    match.group(), chat.get('id'), chat.get('type')
+                )
                 _process_code(
                     code=match.group(),
                     chat_id=str(chat.get('id', '')),
@@ -261,9 +273,33 @@ def expire_verifications():
 # Scheduler startup
 # ─────────────────────────────────────────────
 
+def _acquire_scheduler_lock():
+    """Cross-process PID lock. Only one scheduler runs across all Django processes."""
+    try:
+        if os.path.exists(LOCK_FILE_PATH):
+            try:
+                with open(LOCK_FILE_PATH, 'r') as f:
+                    old_pid = int(f.read().strip())
+                # If the old process is still alive, we cannot take the lock.
+                os.kill(old_pid, 0)
+                return False
+            except (ValueError, ProcessLookupError, FileNotFoundError):
+                # Stale lock file or dead process — take over.
+                pass
+            except PermissionError:
+                return False
+        with open(LOCK_FILE_PATH, 'w') as f:
+            f.write(str(os.getpid()))
+        return True
+    except Exception:
+        return False
+
+
 def start_scheduler():
     global _started
     if _started:
+        return None
+    if not _acquire_scheduler_lock():
         return None
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -271,7 +307,7 @@ def start_scheduler():
 
         scheduler = BackgroundScheduler()
 
-        # Bot polling — every 5 seconds
+        # Bot polling via long-polling — every 5 seconds to avoid overlapping requests
         scheduler.add_job(poll_telegram, IntervalTrigger(seconds=5), id='poll_telegram',
                           max_instances=1, coalesce=True)
         scheduler.add_job(poll_bale, IntervalTrigger(seconds=5), id='poll_bale',
@@ -286,8 +322,8 @@ def start_scheduler():
 
         scheduler.start()
         _started = True
-        print('[Scheduler] Started — bot polling active (every 5s)')
+        logger.info('[Scheduler] Started in process %s — bot polling every 1s', os.getpid())
         return scheduler
     except Exception as e:
-        print(f'[Scheduler] Failed to start: {e}')
+        logger.exception('[Scheduler] Failed to start')
         return None
