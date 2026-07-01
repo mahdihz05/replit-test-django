@@ -3,3 +3,5 @@
 - [Channel verification reactivation](channel-verification-reactivation.md) — re-verifying a previously deleted channel must reactivate the soft-deleted record
 - [Telegram polling latency](telegram-polling-latency.md) — high Replit→Telegram latency makes short-polling unreliable; use long-polling
 - [Dashboard publish trends](dashboard-publish-trends.md) — count successful publishes by completion date, not creation date
+- [AI form field consistency](ai-form-field-consistency.md) — keep frontend input names aligned with existing backend parameters when extending forms
+- [OpenAI JSON retry validation](openai-json-retry-validation.md) — include JSON parsing and schema validation inside the OpenAI retry loop

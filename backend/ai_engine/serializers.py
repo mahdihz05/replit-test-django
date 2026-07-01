@@ -1,5 +1,20 @@
 from rest_framework import serializers
-from .models import AIChatSession, AIChatMessage
+from .models import AIChatSession, AIChatMessage, GenerationBatch, GeneratedItem
+
+
+class GeneratedItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GeneratedItem
+        fields = ['id', 'item_type', 'order', 'content', 'saved_as_draft', 'created_at']
+
+
+class GenerationBatchSerializer(serializers.ModelSerializer):
+    items = GeneratedItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = GenerationBatch
+        fields = ['id', 'mode', 'capability', 'topic', 'tone', 'platform',
+                  'variant_count', 'status', 'wallet_cost_charged', 'created_at', 'items']
 
 
 class AIChatMessageSerializer(serializers.ModelSerializer):

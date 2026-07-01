@@ -130,4 +130,7 @@ WALLET_COSTS = {
     'title_suggestions': 3,
     'hashtag_suggestions': 2,
     'cta_generation': 3,
+    'ai_generate_bundle': 25,        # 2.5x text_generation
+    'ai_generate_variant_2': 16,     # 1.6x text_generation
+    'ai_generate_variant_3': 22,     # 2.2x text_generation
 }

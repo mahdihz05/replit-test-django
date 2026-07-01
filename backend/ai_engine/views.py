@@ -7,8 +7,8 @@ from workspaces.models import WorkspaceMember
 from wallet.models import Wallet, WalletTransaction
 from django.conf import settings
 
-from .models import AIChatSession, AIChatMessage
-from .serializers import AIChatSessionSerializer, AIChatSessionListSerializer, AIChatMessageSerializer
+from .models import AIChatSession, AIChatMessage, GenerationBatch, GeneratedItem
+from .serializers import AIChatSessionSerializer, AIChatSessionListSerializer, AIChatMessageSerializer, GeneratedItemSerializer
 from . import openai_client
 
 
@@ -347,3 +347,194 @@ def generate_cta(request, workspace_id):
 
     deduct_wallet(wallet, cost, f'تولید CTA - {goal[:50]}')
     return Response({'success': True, 'data': {'ctas': result}})
+
+
+# ---------------------------------------------------------------------------
+# New batch generation modes: bundle and multi-variant
+# ---------------------------------------------------------------------------
+
+
+def _create_generation_batch(workspace_id, user, mode, capability, request_data):
+    return GenerationBatch.objects.create(
+        workspace_id=workspace_id,
+        user=user,
+        mode=mode,
+        capability=capability,
+        topic=request_data.get('topic', request_data.get('goal', request_data.get('niche', request_data.get('text', '')))),
+        tone=request_data.get('tone', 'حرفه‌ای'),
+        platform=request_data.get('platform', ''),
+        variant_count=request_data.get('variant_count') if mode == 'multi_variant' else None,
+    )
+
+
+def _items_response(batch, items):
+    return Response({
+        'success': True,
+        'data': {
+            'batch_id': str(batch.id),
+            'items': GeneratedItemSerializer(items, many=True).data,
+        }
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_bundle(request, workspace_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    cost = settings.WALLET_COSTS['ai_generate_bundle']
+    wallet, err = check_wallet(workspace_id, cost)
+    if err:
+        return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+
+    topic = request.data.get('topic', '') or request.data.get('goal', '')
+    if not topic:
+        return Response({'success': False, 'error': 'موضوع نمی‌تواند خالی باشد', 'code': 'EMPTY_TOPIC'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if not settings.OPENAI_API_KEY:
+        return Response({'success': False, 'error': 'کلید API هوش مصنوعی تنظیم نشده است', 'code': 'AI_NOT_CONFIGURED'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    batch = _create_generation_batch(workspace_id, request.user, 'bundle', 'text', request.data)
+
+    result, error, tokens = openai_client.generate_bundle(
+        topic=topic,
+        platform=request.data.get('platform', ''),
+        tone=request.data.get('tone', 'حرفه‌ای'),
+    )
+
+    if error:
+        batch.status = 'failed'
+        batch.save()
+        return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    items = []
+    item_specs = [
+        ('full_text', result['full_text']),
+        ('short_text', result['short_text']),
+        ('hashtags', '\n'.join(result['hashtags'])),
+        ('title', result['title']),
+    ]
+    for order, (item_type, content) in enumerate(item_specs):
+        items.append(GeneratedItem.objects.create(
+            batch=batch,
+            item_type=item_type,
+            order=order,
+            content=content
+        ))
+
+    batch.status = 'success'
+    batch.wallet_cost_charged = cost
+    batch.save()
+    deduct_wallet(wallet, cost, f'بازتولید همزمان - {topic[:50]}')
+    return _items_response(batch, items)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_multi_variant(request, workspace_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    capability = request.data.get('capability', '')
+    if capability not in {'text', 'rewrite', 'summary', 'scenario', 'title', 'hashtag', 'cta', 'idea'}:
+        return Response({'success': False, 'error': 'قابلیت نامعتبر', 'code': 'INVALID_CAPABILITY'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        variant_count = int(request.data.get('variant_count', 2))
+    except (ValueError, TypeError):
+        return Response({'success': False, 'error': 'تعداد نسخه باید ۲ یا ۳ باشد', 'code': 'INVALID_VARIANT_COUNT'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if variant_count not in (2, 3):
+        return Response({'success': False, 'error': 'تعداد نسخه باید ۲ یا ۳ باشد', 'code': 'INVALID_VARIANT_COUNT'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    cost_key = 'ai_generate_variant_2' if variant_count == 2 else 'ai_generate_variant_3'
+    cost = settings.WALLET_COSTS[cost_key]
+    wallet, err = check_wallet(workspace_id, cost)
+    if err:
+        return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+
+    if not settings.OPENAI_API_KEY:
+        return Response({'success': False, 'error': 'کلید API هوش مصنوعی تنظیم نشده است', 'code': 'AI_NOT_CONFIGURED'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    params = dict(request.data)
+    params['variant_count'] = variant_count
+    batch = _create_generation_batch(workspace_id, request.user, 'multi_variant', capability, params)
+
+    variants, error, tokens = openai_client.generate_variants(capability, params, count=variant_count)
+
+    if error:
+        batch.status = 'failed'
+        batch.save()
+        return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    items = []
+    for order, content in enumerate(variants):
+        items.append(GeneratedItem.objects.create(
+            batch=batch,
+            item_type='variant',
+            order=order + 1,
+            content=content
+        ))
+
+    batch.status = 'success'
+    batch.wallet_cost_charged = cost
+    batch.save()
+    deduct_wallet(wallet, cost, f'تولید چندگزینه‌ای {capability} - {variant_count} نسخه')
+    return _items_response(batch, items)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def save_generated_item(request, workspace_id, item_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        item = GeneratedItem.objects.get(
+            id=item_id,
+            batch__workspace_id=workspace_id,
+            batch__user=request.user,
+            batch__is_active=True
+        )
+    except GeneratedItem.DoesNotExist:
+        return Response({'success': False, 'error': 'آیتم یافت نشد', 'code': 'NOT_FOUND'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    if item.saved_as_draft:
+        return Response({'success': True, 'data': {'message': 'این آیتم قبلاً ذخیره شده است'}})
+
+    title = request.data.get('title') or item.batch.topic[:100] or 'محتوای تولید شده'
+    if item.item_type == 'title':
+        title = item.content[:100]
+
+    from content.models import Content
+    content = Content.objects.create(
+        workspace_id=workspace_id,
+        created_by=request.user,
+        title=title,
+        body=item.content,
+        status='draft',
+        language='fa',
+        goal=item.batch.topic[:300]
+    )
+
+    item.saved_as_draft = True
+    item.save()
+
+    return Response({'success': True, 'data': {'content_id': str(content.id), 'message': 'در پیش‌نویس‌ها ذخیره شد'}})

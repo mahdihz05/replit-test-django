@@ -237,3 +237,159 @@ def chat_completion(messages):
         return text, None, tokens
     except Exception as e:
         return None, str(e), 0
+
+
+import json
+import re
+
+
+def _clean_json_response(text):
+    """Extract JSON from markdown code fences if present."""
+    text = text.strip()
+    if text.startswith('```'):
+        text = text.strip('`').strip()
+        if text.lower().startswith('json'):
+            text = text[4:].strip()
+    return text
+
+
+def _parse_json(text):
+    text = _clean_json_response(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _call_openai_with_retry(system_prompt, user_prompt, response_format=None, max_retries=3, validate=None):
+    """Call OpenAI with retry. validate(text) should return parsed object on success or None on failure."""
+    client = get_openai_client()
+    if not client or not settings.OPENAI_API_KEY:
+        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
+
+    messages = [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': user_prompt}
+    ]
+
+    last_error = None
+    total_tokens = 0
+    for attempt in range(max_retries):
+        try:
+            kwargs = {'model': 'gpt-4o', 'messages': messages}
+            if response_format:
+                kwargs['response_format'] = response_format
+            response = client.chat.completions.create(**kwargs)
+            text = response.choices[0].message.content
+            total_tokens += response.usage.total_tokens or 0
+
+            if validate:
+                parsed = validate(text)
+                if parsed is not None:
+                    return parsed, None, total_tokens
+                last_error = 'تولید محتوا با خطا مواجه شد. لطفاً دوباره تلاش کنید.'
+                continue
+            return text, None, total_tokens
+        except Exception as e:
+            last_error = str(e)
+
+    return None, last_error or 'تولید محتوا با خطا مواجه شد. لطفاً دوباره تلاش کنید.', total_tokens
+
+
+def _validate_bundle(text):
+    data = _parse_json(text)
+    if not data or not all(k in data for k in ('full_text', 'short_text', 'hashtags', 'title')):
+        return None
+    if not isinstance(data['hashtags'], list):
+        data['hashtags'] = [str(data['hashtags'])]
+    return data
+
+
+def generate_bundle(topic, platform='', tone='حرفه‌ای'):
+    """Generate full text, short text, hashtags and title in one OpenAI call."""
+    system_prompt = (
+        'You are an expert Persian content creator. '
+        'Return only a valid JSON object with no Markdown or extra explanation. '
+        'The JSON must contain exactly these keys: full_text, short_text, hashtags, title.'
+    )
+    user_prompt = f"""محتوای جامع برای این موضوع بساز:
+موضوع: {topic}
+پلتفرم: {platform}
+لحن: {tone}
+
+خروجی باید JSON باشد با این ساختار:
+{{
+  "full_text": "متن کامل و نسبتاً بلند (حداقل ۵۰۰ کاراکتر)",
+  "short_text": "نسخه خلاصه و کوتاه مناسب تلگرام/بله، حداکثر ۴۰۰ کاراکتر",
+  "hashtags": ["هشتگ۱", "هشتگ۲", "هشتگ۳", "هشتگ۴", "هشتگ۵"],
+  "title": "یک عنوان جذاب و کوتاه"
+}}
+
+فقط JSON خالص بدون توضیح اضافه برگردان."""
+
+    data, error, tokens = _call_openai_with_retry(
+        system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3, validate=_validate_bundle
+    )
+    return data, error, tokens
+
+
+def _validate_variants(count):
+    def validator(text):
+        data = _parse_json(text)
+        if not data or not isinstance(data.get('variants'), list) or len(data['variants']) < count:
+            return None
+        return data['variants'][:count]
+    return validator
+
+
+def generate_variants(capability, params, count=2):
+    """Generate N variants for a given capability in one OpenAI call."""
+    system_prompt = (
+        'You are an expert Persian content creator. '
+        'Return only a valid JSON object with no Markdown or extra explanation. '
+        'The JSON must contain exactly one key: "variants" which is an array of strings.'
+    )
+
+    capability_labels = {
+        'text': 'تولید متن',
+        'rewrite': 'بازنویسی',
+        'summary': 'خلاصه‌سازی',
+        'scenario': 'سناریو',
+        'title': 'پیشنهاد عنوان',
+        'hashtag': 'پیشنهاد هشتگ',
+        'cta': 'CTA',
+        'idea': 'ایده محتوا',
+    }
+    label = capability_labels.get(capability, 'تولید محتوا')
+
+    topic = params.get('topic', params.get('goal', params.get('niche', params.get('text', ''))))
+    tone = params.get('tone', 'حرفه‌ای')
+    platform = params.get('platform', '')
+    length = params.get('length', 'brief')
+    word_count = params.get('word_count', 300)
+
+    capability_prompts = {
+        'text': f'با لحن {tone} و برای پلتفرم {platform}، {count} متن متفاوت برای موضوع زیر بنویس. هر نسخه حدود {word_count} کلمه داشته باشد.',
+        'rewrite': f'متن زیر را با {count} لحن/زاویه متفاوت بازنویسی کن. لحن پیشنهادی: {tone}.',
+        'summary': f'متن زیر را در {count} خلاصه با طول یا زاویه متفاوت خلاصه کن. طول مورد نظر: {length}.',
+        'scenario': f'برای موضوع {topic} و پلتفرم {platform} با هدف {params.get("goal", "")}، {count} سناریوی محتوایی متفاوت بنویس.',
+        'title': f'{count} عنوان متفاوت برای موضوع {topic} پیشنهاد بده.',
+        'hashtag': f'{count} هشتگ متفاوت برای موضوع {topic} و پلتفرم {platform} پیشنهاد بده.',
+        'cta': f'{count} CTA متفاوت برای هدف {topic} و پلتفرم {platform} بنویس.',
+        'idea': f'{count} ایده متفاوت برای حوزه {topic} و پلتفرم {platform} پیشنهاد بده.',
+    }
+
+    body_context = f"\n\nمحتوا/متن/ورودی:\n{topic}" if topic else ''
+    user_prompt = f"""{capability_prompts.get(capability, f'{count} نسخه متفاوت برای {label} تولید کن')}
+
+خروجی باید JSON باشد:
+{{
+  "variants": ["نسخه ۱", "نسخه ۲", "نسخه ۳"]
+}}
+
+هر آیتم آرایه یک نسخه کامل و مستقل باشد. فقط JSON خالص بدون توضیح اضافه برگردان.{body_context}"""
+
+    variants, error, tokens = _call_openai_with_retry(
+        system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3, validate=_validate_variants(count)
+    )
+    return variants, error, tokens

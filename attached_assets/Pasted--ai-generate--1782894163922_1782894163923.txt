@@ -1,0 +1,163 @@
+# پرامپت: ارتقای بخش تولید متن هوش مصنوعی (/ai-generate)
+
+## مهم - محدوده تغییرات
+این تغییرات **فقط** باید در ماژول `/ai-generate` (تولید متن با ۸ قابلیت موجود) اعمال شود.
+هیچ تغییری در موارد زیر ایجاد نکن:
+- بخش تولید تصویر (`/ai-images`)
+- بخش دستیار چت (`/ai-chat`)
+- سیستم OTP، مدیریت Workspace، مدیریت کاربران
+- منطق اصلی کیف پول (فقط ثابت‌های هزینه جدید اضافه می‌شود، نه خود سیستم کسر اعتبار)
+- بخش پابلیشینگ/تلگرام/بله
+
+قبل از شروع، فایل‌های مربوط به `/ai-generate` را پیدا کن (view، serializer، template یا کامپوننت JS، URL موجود) و تغییرات را فقط در همان فایل‌ها (یا فایل‌های جدید مرتبط) اعمال کن.
+
+---
+
+## هدف
+در حال حاضر `/ai-generate` یک ورودی می‌گیرد، یک قابلیت (متن/سناریو/بازنویسی/خلاصه/عنوان/هشتگ/CTA/ایده) تولید می‌کند و یک خروجی نمایش می‌دهد. می‌خواهیم دو حالت جدید تولید اضافه شود، در کنار حالت فعلی (استاندارد):
+
+### حالت ۱: بازتولید همزمان (Bundle Mode)
+از یک ورودی (موضوع/هدف)، همزمان و در **یک درخواست به OpenAI**، ۴ خروجی مرتبط تولید شود:
+1. متن کامل (بر اساس لحن و پلتفرم انتخابی)
+2. نسخه کوتاه (مناسب تلگرام/بله، حداکثر ۴۰۰ کاراکتر)
+3. لیست ۵ تا ۸ هشتگ مرتبط
+4. یک عنوان پیشنهادی
+
+### حالت ۲: تولید چندگزینه‌ای (Multi-Variant Mode)
+کاربر تعداد نسخه (۲ یا ۳) را انتخاب می‌کند و برای همان قابلیت انتخابی (مثلاً «تولید متن»)، ۲ یا ۳ نسخه متفاوت از نظر لحن/زاویه نگارش تولید می‌شود تا کاربر بهترین را انتخاب کند. این هم باید در **یک درخواست به OpenAI** انجام شود (نه چند کال جدا).
+
+این دو حالت با هم **قابل ترکیب نیستند** — کاربر یکی از سه حالت را انتخاب می‌کند: استاندارد / بازتولید همزمان / چندگزینه‌ای.
+
+---
+
+## تغییرات رابط کاربری (UI)
+
+بالای فرم فعلی `/ai-generate`، یک گروه انتخاب (radio/segmented control) اضافه کن:
+
+```
+[ استاندارد ]  [ بازتولید همزمان ]  [ چندگزینه‌ای ]
+```
+
+- **استاندارد**: همان رفتار فعلی، بدون تغییر.
+- **بازتولید همزمان**: انتخاب قابلیت (۸ گزینه فعلی) مخفی/غیرفعال می‌شود چون فقط برای قابلیت «تولید متن» معنا دارد؛ فرم فقط موضوع، لحن و پلتفرم را می‌گیرد.
+- **چندگزینه‌ای**: فرم فعلی + یک انتخابگر عددی «تعداد نسخه» (۲ یا ۳) اضافه می‌شود. قابلیت انتخابی همان ۸ گزینه فعلی باقی می‌ماند (کاربر می‌تواند برای «سناریو» یا «خلاصه» هم چند نسخه بخواهد).
+
+### نمایش نتیجه
+- در حالت **استاندارد**: بدون تغییر (یک کارت).
+- در حالت **بازتولید همزمان**: ۴ کارت جداگانه (متن کامل / نسخه کوتاه / هشتگ‌ها / عنوان)، هرکدام دکمه «کپی» و «ذخیره در پیش‌نویس‌ها» مستقل دارند.
+- در حالت **چندگزینه‌ای**: N کارت هم‌عرض کنار هم (یا زیر هم در موبایل)، هرکدام برچسب «نسخه ۱»، «نسخه ۲» و... و دکمه «کپی» و «انتخاب و ذخیره». وقتی کاربر یکی را ذخیره کرد، بقیه فقط برای مقایسه باقی می‌مانند (نیازی به ذخیره اجباری بقیه نیست).
+
+نمایش هزینه تخمینی کیف پول قبل از تولید، متناسب با حالت انتخابی (توضیح در بخش کیف پول).
+
+---
+
+## تغییرات بک‌اند
+
+### مدل‌های جدید
+
+```python
+# GenerationBatch: یک درخواست تولید (شامل یک یا چند خروجی)
+class GenerationBatch(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey('workspaces.Workspace', on_delete=models.CASCADE, related_name='ai_generation_batches')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    mode = models.CharField(max_length=20, choices=[
+        ('standard', 'استاندارد'),
+        ('bundle', 'بازتولید همزمان'),
+        ('multi_variant', 'چندگزینه‌ای'),
+    ])
+    capability = models.CharField(max_length=30)  # تولید متن، سناریو، ... (برای bundle همیشه 'text')
+    topic = models.TextField()
+    tone = models.CharField(max_length=30)
+    platform = models.CharField(max_length=30)
+    variant_count = models.PositiveSmallIntegerField(null=True, blank=True)  # فقط برای multi_variant
+    wallet_cost_charged = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, default='pending')  # pending, success, failed
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)  # soft delete طبق الگوی پروژه
+
+# GeneratedItem: هر خروجی مجزا درون یک batch
+class GeneratedItem(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.ForeignKey(GenerationBatch, on_delete=models.CASCADE, related_name='items')
+    item_type = models.CharField(max_length=20, choices=[
+        ('full_text', 'متن کامل'),
+        ('short_text', 'نسخه کوتاه'),
+        ('hashtags', 'هشتگ‌ها'),
+        ('title', 'عنوان'),
+        ('variant', 'نسخه'),
+    ])
+    order = models.PositiveSmallIntegerField(default=0)  # برای چیدمان نسخه‌ها (۱، ۲، ۳)
+    content = models.TextField()
+    saved_as_draft = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+```
+
+migration برای این دو مدل را بساز. به هیچ مدل دیگری دست نزن.
+
+### منطق فراخوانی OpenAI (یک کال، خروجی ساختاریافته JSON)
+
+برای هر دو حالت جدید، از OpenAI بخواه خروجی را **فقط به فرم JSON** برگرداند (با `response_format: {"type": "json_object"}` اگر SDK پشتیبانی می‌کند، یا با دستور صریح در system prompt که «فقط JSON خالص برگردان، بدون توضیح یا Markdown»).
+
+مثال ساختار خروجی مورد انتظار برای Bundle:
+```json
+{
+  "full_text": "...",
+  "short_text": "...",
+  "hashtags": ["...", "..."],
+  "title": "..."
+}
+```
+
+مثال ساختار خروجی مورد انتظار برای Multi-Variant:
+```json
+{
+  "variants": ["نسخه اول کامل", "نسخه دوم کامل", "نسخه سوم کامل"]
+}
+```
+
+### سیستم Retry
+طبق الگوی موجود پروژه (سه بار تلاش با پیام خطای فارسی): اگر پاسخ OpenAI قابل parse به JSON نبود یا کلیدهای موردنیاز را نداشت، تا ۳ بار دوباره تلاش کن. اگر بعد از ۳ تلاش هم شکست خورد:
+- `GenerationBatch.status = 'failed'`
+- **هیچ مبلغی از کیف پول کسر نشود**
+- پیام خطای فارسی مشخص نمایش داده شود: `"تولید محتوا با خطا مواجه شد. لطفاً دوباره تلاش کنید."`
+
+### کیف پول (WALLET_COSTS)
+ثابت‌های جدید را به دیکشنری/تنظیمات موجود `WALLET_COSTS` اضافه کن (به فایل و متغیر فعلی که در پروژه هست دست نزن، فقط کلید جدید اضافه کن):
+
+```python
+WALLET_COSTS.update({
+    'ai_generate_bundle': <۲.۵ برابر هزینه فعلی تولید متن استاندارد>,
+    'ai_generate_variant_2': <۱.۶ برابر هزینه فعلی تولید متن استاندارد>,
+    'ai_generate_variant_3': <۲.۲ برابر هزینه فعلی تولید متن استاندارد>,
+})
+```
+(اعداد دقیق را بر اساس هزینه فعلی `ai_generate_text` که در پروژه تعریف شده محاسبه کن — ضریب‌ها به این دلیل کمتر از خطی هستند که چند خروجی در یک کال OpenAI تولید می‌شود، نه چند کال جدا.)
+
+کسر اعتبار **فقط بعد از موفقیت کامل** batch انجام شود (طبق الگوی موجود پروژه که اعتبار فقط بعد از عملیات موفق هوش مصنوعی کسر می‌شود).
+
+### API Endpoint
+اگر endpoint فعلی `/ai-generate` یک POST ساده است، پارامترهای جدید را اضافه کن:
+```
+mode: "standard" | "bundle" | "multi_variant"   (پیش‌فرض: standard)
+variant_count: 2 | 3   (فقط وقتی mode=multi_variant)
+```
+پاسخ باید شامل `batch_id` و لیست `items` (هرکدام با `id`, `item_type`, `order`, `content`) باشد تا فرانت بتواند هر آیتم را جدا کپی/ذخیره کند.
+
+### ذخیره در پیش‌نویس
+endpoint موجود ذخیره پیش‌نویس را طوری تطبیق بده که بپذیرد کدام `GeneratedItem.id` باید به‌عنوان پیش‌نویس ذخیره شود (به‌جای کل متن خام). بعد از ذخیره موفق، `saved_as_draft=True` روی آن آیتم ست شود.
+
+---
+
+## نکات دامنه‌بندی و امنیت
+- تمام مدل‌ها و query ها باید بر اساس `workspace` کاربر لاگین‌شده فیلتر شوند (Row-level multi-tenancy طبق الگوی موجود).
+- کلید OpenAI API را هاردکد نکن؛ از همان مکانیزم فعلی پروژه (environment variable) استفاده کن. اگر کلید تنظیم نشده بود، همان پیام فعلی `کلید API هوش مصنوعی تنظیم نشده است` را برگردان (رفتار موجود را حفظ کن).
+
+## خروجی مورد انتظار
+کد کامل و بدون placeholder یا TODO بنویس:
+- migration فایل‌های جدید
+- تغییرات model / serializer / view
+- تغییرات template یا JS بخش `/ai-generate` برای UI جدید (سه حالت + نمایش کارت‌های چندگانه)
+- منطق کامل parse و retry برای پاسخ JSON از OpenAI
+
+هیچ فایل دیگری از پروژه را لمس نکن.
