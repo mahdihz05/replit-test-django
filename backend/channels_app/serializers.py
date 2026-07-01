@@ -12,4 +12,4 @@ class PublishChannelSerializer(serializers.ModelSerializer):
 class ChannelVerificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChannelVerification
-        fields = ['id', 'platform', 'token', 'status', 'expires_at', 'created_at']
+        fields = ['id', 'platform', 'name', 'channel_type', 'token', 'status', 'expires_at', 'created_at']

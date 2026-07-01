@@ -1,40 +1,175 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { FileText, Send, Coins, Share2, Activity, Plus, Bot } from "lucide-react";
+import {
+  Card, CardContent, CardDescription, CardHeader, CardTitle
+} from "@/components/ui/card";
+import {
+  FileText, Send, Coins, Share2, Activity, Plus, Bot, AlertCircle,
+  TrendingUp, CheckCircle2, XCircle, Clock
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
+import { useToast } from "@/hooks/use-toast";
+import {
+  ResponsiveContainer,
+  PieChart, Pie, Cell, Tooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  LineChart, Line, Area, AreaChart
+} from "recharts";
+
+interface DashboardData {
+  contents: {
+    total: number;
+    by_status: Record<string, number>;
+  };
+  publishes: {
+    total: number;
+    by_status: Record<string, number>;
+    by_day: { date: string; count: number }[];
+  };
+  channels: {
+    total: number;
+    verified: number;
+    by_platform: Record<string, number>;
+  };
+  wallet: {
+    balance: number;
+    total_spent: number;
+    total_charged: number;
+  };
+  recent_errors: {
+    error_type: string;
+    user_message: string;
+    attempted_at: string;
+  }[];
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  draft: "#94a3b8",
+  ready: "#3b82f6",
+  scheduled: "#f59e0b",
+  publishing: "#8b5cf6",
+  published: "#10b981",
+  failed: "#ef4444",
+};
+
+const PLATFORM_COLORS: Record<string, string> = {
+  telegram: "#3b82f6",
+  bale: "#10b981",
+  website: "#8b5cf6",
+};
+
+const STATUS_NAMES: Record<string, string> = {
+  draft: "پیش‌نویس",
+  ready: "آماده",
+  scheduled: "زمان‌بندی شده",
+  publishing: "در حال انتشار",
+  published: "منتشر شده",
+  failed: "ناموفق",
+};
+
+const PLATFORM_NAMES: Record<string, string> = {
+  telegram: "تلگرام",
+  bale: "بله",
+  website: "وب‌سایت",
+};
+
+function formatNumber(n: number) {
+  return n.toLocaleString("fa-IR");
+}
+
+function toPersianDate(iso: string) {
+  try {
+    return new Date(iso).toLocaleDateString("fa-IR", {
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
 
 export default function Dashboard() {
   const { selectedWorkspace } = useAuth();
-  const [stats, setStats] = useState({
-    totalContent: 0,
-    publishedToday: 0,
-    aiCredits: 0,
-    activeChannels: 0,
-  });
+  const { toast } = useToast();
+  const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (selectedWorkspace) {
-      // Mock loading stats
-      setLoading(true);
-      setTimeout(() => {
-        setStats({
-          totalContent: 124,
-          publishedToday: 5,
-          aiCredits: 45000,
-          activeChannels: 3
-        });
-        setLoading(false);
-      }, 500);
-    }
-  }, [selectedWorkspace]);
+    if (!selectedWorkspace) return;
+    setLoading(true);
+    apiFetch(`/workspaces/${selectedWorkspace.id}/dashboard/`)
+      .then((res) => {
+        if (res?.data) setData(res.data);
+      })
+      .catch(() => {
+        toast({ title: "خطا", description: "دریافت اطلاعات داشبورد ناموفق بود", variant: "destructive" });
+      })
+      .finally(() => setLoading(false));
+  }, [selectedWorkspace, toast]);
 
   if (!selectedWorkspace) {
     return <div className="p-8 text-center text-muted-foreground">فضای کاری انتخاب نشده است</div>;
   }
+
+  const contentChartData = data
+    ? Object.entries(data.contents.by_status).map(([status, count]) => ({
+        name: STATUS_NAMES[status] || status,
+        value: count,
+        color: STATUS_COLORS[status] || "#94a3b8",
+      }))
+    : [];
+
+  const channelChartData = data
+    ? Object.entries(data.channels.by_platform).map(([platform, count]) => ({
+        name: PLATFORM_NAMES[platform] || platform,
+        value: count,
+        color: PLATFORM_COLORS[platform] || "#8b5cf6",
+      }))
+    : [];
+
+  const publishStatusData = data
+    ? Object.entries(data.publishes.by_status).map(([status, count]) => ({
+        name: status === "success" ? "موفق" : status === "failed" ? "ناموفق" : status,
+        value: count,
+        color: status === "success" ? "#10b981" : status === "failed" ? "#ef4444" : "#f59e0b",
+      }))
+    : [];
+
+  const publishDayData = data?.publishes.by_day || [];
+
+  const statCards = [
+    {
+      title: "کل محتوا",
+      value: data?.contents.total ?? 0,
+      icon: FileText,
+      trend: "+۱۲٪ نسبت به ماه قبل",
+      color: "text-blue-500",
+    },
+    {
+      title: "منتشر شده امروز",
+      value: data?.publishes.by_day[6]?.count ?? 0,
+      icon: Send,
+      trend: `${data?.publishes.total ?? 0} انتشار کل`,
+      color: "text-emerald-500",
+    },
+    {
+      title: "موجودی اعتبار (تومان)",
+      value: formatNumber(data?.wallet.balance ?? 0),
+      icon: Coins,
+      trend: `${formatNumber(data?.wallet.total_spent ?? 0)} مصرف شده`,
+      color: "text-amber-500",
+    },
+    {
+      title: "کانال‌های فعال",
+      value: data?.channels.total ?? 0,
+      icon: Share2,
+      trend: `${data?.channels.verified ?? 0} تایید شده`,
+      color: "text-violet-500",
+    },
+  ];
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -60,55 +195,235 @@ export default function Dashboard() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium">کل محتوا</CardTitle>
-            <FileText className="w-4 h-4 text-muted-foreground" />
+        {statCards.map((card) => (
+          <Card key={card.title}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
+              <CardTitle className="text-sm font-medium">{card.title}</CardTitle>
+              <card.icon className={`w-4 h-4 ${card.color}`} />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{loading ? "..." : card.value}</div>
+              <p className="text-xs text-muted-foreground mt-1">{card.trend}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              روند انتشار ۷ روز اخیر
+            </CardTitle>
+            <CardDescription>تعداد انتشارهای موفق در هر روز</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{loading ? "..." : stats.totalContent}</div>
-            <p className="text-xs text-muted-foreground mt-1">+۱۲٪ نسبت به ماه قبل</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium">منتشر شده امروز</CardTitle>
-            <Send className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{loading ? "..." : stats.publishedToday}</div>
-            <p className="text-xs text-muted-foreground mt-1">۲ در صف انتشار</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium">موجودی هوش مصنوعی (کلمه)</CardTitle>
-            <Coins className="w-4 h-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{loading ? "..." : stats.aiCredits.toLocaleString('fa-IR')}</div>
-            <p className="text-xs text-muted-foreground mt-1">بسته پایه</p>
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={publishDayData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorPublishes" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
+                    formatter={(value: number) => [formatNumber(value), "انتشار موفق"]}
+                    labelStyle={{ color: "#64748b" }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="count"
+                    stroke="#3b82f6"
+                    strokeWidth={3}
+                    fillOpacity={1}
+                    fill="url(#colorPublishes)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-sm font-medium">کانال‌های فعال</CardTitle>
-            <Share2 className="w-4 h-4 text-muted-foreground" />
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-primary" />
+              وضعیت محتوا
+            </CardTitle>
+            <CardDescription>توزیع محتوا بر اساس وضعیت</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{loading ? "..." : stats.activeChannels}</div>
-            <p className="text-xs text-muted-foreground mt-1">تلگرام، بله، وب‌سایت</p>
+            <div className="h-72">
+              {contentChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={contentChartData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={90}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {contentChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
+                      formatter={(value: number, name: string) => [formatNumber(value), name]}
+                    />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      formatter={(value: string) => <span className="text-xs">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+                  <FileText className="w-10 h-10 opacity-30" />
+                  <p className="text-sm">محتوایی ثبت نشده است</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Share2 className="w-5 h-5 text-primary" />
+              کانال‌ها بر اساس پلتفرم
+            </CardTitle>
+            <CardDescription>تعداد کانال‌های فعال در هر پلتفرم</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              {channelChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={channelChartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 12 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
+                      formatter={(value: number) => [formatNumber(value), "کانال"]}
+                    />
+                    <Bar dataKey="value" radius={[8, 8, 0, 0]}>
+                      {channelChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+                  <Share2 className="w-10 h-10 opacity-30" />
+                  <p className="text-sm">کانالی ثبت نشده است</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Send className="w-5 h-5 text-primary" />
+              وضعیت انتشار
+            </CardTitle>
+            <CardDescription>نسبت انتشارهای موفق و ناموفق</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              {publishStatusData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={publishStatusData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={90}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {publishStatusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ borderRadius: 8, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" }}
+                      formatter={(value: number, name: string) => [formatNumber(value), name]}
+                    />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      formatter={(value: string) => <span className="text-xs">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-2">
+                  <Send className="w-10 h-10 opacity-30" />
+                  <p className="text-sm">انتشاری ثبت نشده است</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-primary" />
+              خطاهای اخیر
+            </CardTitle>
+            <CardDescription>۵ خطای آخر در انتشار</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {data?.recent_errors && data.recent_errors.length > 0 ? (
+                data.recent_errors.map((err, i) => (
+                  <div key={i} className="flex items-start gap-3 pb-4 border-b last:border-0 last:pb-0">
+                    <div className="w-8 h-8 rounded-full bg-destructive/10 flex items-center justify-center shrink-0 mt-0.5">
+                      <XCircle className="w-4 h-4 text-destructive" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{err.user_message || err.error_type}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{toPersianDate(err.attempted_at)}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="h-48 flex flex-col items-center justify-center text-muted-foreground gap-2">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-500 opacity-60" />
+                  <p className="text-sm">خطایی ثبت نشده است</p>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card className="col-span-1">
+        <Card>
           <CardHeader>
-            <CardTitle>آخرین فعالیت‌ها</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-primary" />
+              آخرین فعالیت‌ها
+            </CardTitle>
             <CardDescription>اتفاقات اخیر در این فضای کاری</CardDescription>
           </CardHeader>
           <CardContent>
@@ -128,9 +443,12 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="col-span-1">
+        <Card>
           <CardHeader>
-            <CardTitle>در صف انتشار</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-primary" />
+              در صف انتشار
+            </CardTitle>
             <CardDescription>محتواهای زمان‌بندی شده برای آینده</CardDescription>
           </CardHeader>
           <CardContent>
@@ -140,18 +458,14 @@ export default function Dashboard() {
                   <p className="font-medium text-sm">راهنمای استفاده از خدمات</p>
                   <p className="text-xs text-muted-foreground">تلگرام • فردا ۱۰:۰۰ صبح</p>
                 </div>
-                <div className="px-2 py-1 bg-amber-100 text-amber-800 rounded text-xs font-medium dark:bg-amber-900/30 dark:text-amber-400">
-                  زمان‌بندی شده
-                </div>
+                <Badge variant="secondary">زمان‌بندی شده</Badge>
               </div>
               <div className="flex items-center justify-between border-b pb-4">
                 <div>
                   <p className="font-medium text-sm">اطلاعیه تخفیف نوروزی</p>
                   <p className="text-xs text-muted-foreground">بله، تلگرام • دوشنبه ۱۸:۰۰</p>
                 </div>
-                <div className="px-2 py-1 bg-amber-100 text-amber-800 rounded text-xs font-medium dark:bg-amber-900/30 dark:text-amber-400">
-                  زمان‌بندی شده
-                </div>
+                <Badge variant="secondary">زمان‌بندی شده</Badge>
               </div>
             </div>
             <Button variant="outline" className="w-full mt-4" asChild>

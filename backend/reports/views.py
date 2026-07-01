@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.db.models import Count, Sum
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -12,6 +15,80 @@ def get_member(user, workspace_id):
         return WorkspaceMember.objects.get(workspace_id=workspace_id, user=user)
     except WorkspaceMember.DoesNotExist:
         return None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_stats(request, workspace_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    from content.models import Content
+    from publishing.models import PublishJob, PublishLog
+    from channels_app.models import PublishChannel
+    from wallet.models import Wallet, WalletTransaction
+
+    contents = Content.objects.filter(workspace_id=workspace_id, is_active=True)
+    content_status = contents.values('status').annotate(count=Count('id'))
+
+    jobs = PublishJob.objects.filter(content__workspace_id=workspace_id)
+    job_status = jobs.values('status').annotate(count=Count('id'))
+
+    today = timezone.now().date()
+    publishes_by_day = []
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        # Use completed_at for successful publishes so scheduled/retried jobs
+        # are counted on the day they actually finished, not when they were queued.
+        publishes_by_day.append({
+            'date': d.strftime('%m/%d'),
+            'count': jobs.filter(completed_at__date=d, status='success').count()
+        })
+
+    channels = PublishChannel.objects.filter(workspace_id=workspace_id, is_active=True)
+    channel_platform = channels.values('platform').annotate(count=Count('id'))
+    verified_count = channels.filter(is_verified=True).count()
+
+    try:
+        wallet = Wallet.objects.get(workspace_id=workspace_id)
+        balance = float(wallet.balance)
+        total_spent = WalletTransaction.objects.filter(wallet=wallet, type='deduct').aggregate(
+            total=Sum('amount'))['total'] or 0
+        total_charged = WalletTransaction.objects.filter(wallet=wallet, type='charge').aggregate(
+            total=Sum('amount'))['total'] or 0
+    except Wallet.DoesNotExist:
+        balance = 0
+        total_spent = 0
+        total_charged = 0
+
+    recent_errors = PublishLog.objects.filter(
+        job__content__workspace_id=workspace_id, success=False
+    ).order_by('-attempted_at').values('error_type', 'user_message', 'attempted_at')[:5]
+
+    return Response({'success': True, 'data': {
+        'contents': {
+            'total': contents.count(),
+            'by_status': {item['status']: item['count'] for item in content_status},
+        },
+        'publishes': {
+            'total': jobs.count(),
+            'by_status': {item['status']: item['count'] for item in job_status},
+            'by_day': publishes_by_day,
+        },
+        'channels': {
+            'total': channels.count(),
+            'verified': verified_count,
+            'by_platform': {item['platform']: item['count'] for item in channel_platform},
+        },
+        'wallet': {
+            'balance': balance,
+            'total_spent': float(total_spent),
+            'total_charged': float(total_charged),
+        },
+        'recent_errors': list(recent_errors),
+    }})
 
 
 @api_view(['GET'])

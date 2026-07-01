@@ -1,2 +1,5 @@
 - [Django workflow path](django-workflow-path.md) — artifact.toml run command must use absolute path for Django manage.py
 - [Django app naming](django-app-naming.md) — channels app renamed to channels_app to avoid Django Channels conflict
+- [Channel verification reactivation](channel-verification-reactivation.md) — re-verifying a previously deleted channel must reactivate the soft-deleted record
+- [Telegram polling latency](telegram-polling-latency.md) — high Replit→Telegram latency makes short-polling unreliable; use long-polling
+- [Dashboard publish trends](dashboard-publish-trends.md) — count successful publishes by completion date, not creation date

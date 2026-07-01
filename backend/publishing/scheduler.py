@@ -27,16 +27,16 @@ def poll_telegram():
     if not token:
         return
     try:
-        # Long-poll Telegram for up to 5 seconds. When a new message arrives,
-        # Telegram returns immediately; otherwise it waits ~5s, then we retry.
+        # Long-poll Telegram for up to 3 seconds. When a new message arrives,
+        # Telegram returns immediately; otherwise it waits ~3s, then we retry.
         # This avoids overlapping short-poll requests when network latency is high.
-        long_poll_timeout = 5
+        long_poll_timeout = 3
         url = f'https://api.telegram.org/bot{token}/getUpdates'
         resp = req_lib.get(url, params={
             'offset': _offsets['telegram'],
             'timeout': long_poll_timeout,
             'allowed_updates': ['message', 'channel_post'],
-        }, timeout=long_poll_timeout + 5)
+        }, timeout=8)
         if not resp.ok:
             return
         data = resp.json()
@@ -125,13 +125,16 @@ def _process_code(code, chat_id, username, chat_type, platform, token, message_i
     # Map Telegram chat type → our channel_type
     ch_type = 'group' if chat_type in ('group', 'supergroup') else 'channel'
 
-    # Create or get the channel record
+    # Create or get the channel record. Because of unique_together on
+    # (workspace, platform, external_id), a previously "deleted" (is_active=False)
+    # channel may still exist. We must reactivate it and refresh its metadata.
+    channel_name = verification.name.strip() or f'{platform.title()} {chat_id}'
     channel, created = PublishChannel.objects.get_or_create(
         workspace=verification.workspace,
         platform=platform,
         external_id=chat_id,
         defaults={
-            'name': f'{platform.title()} {chat_id}',
+            'name': channel_name,
             'username': username,
             'channel_type': ch_type,
             'is_verified': True,
@@ -140,6 +143,8 @@ def _process_code(code, chat_id, username, chat_type, platform, token, message_i
     )
     if not created:
         channel.is_verified = True
+        channel.is_active = True
+        channel.name = channel_name or channel.name
         channel.username = username or channel.username
         channel.channel_type = ch_type
         channel.save()
@@ -307,10 +312,12 @@ def start_scheduler():
 
         scheduler = BackgroundScheduler()
 
-        # Bot polling via long-polling — every 5 seconds to avoid overlapping requests
-        scheduler.add_job(poll_telegram, IntervalTrigger(seconds=5), id='poll_telegram',
+        # Bot polling via long-polling. Interval is slightly longer than the HTTP
+        # timeout so that APScheduler doesn't constantly skip overlapping instances
+        # when network latency to Telegram is high.
+        scheduler.add_job(poll_telegram, IntervalTrigger(seconds=8), id='poll_telegram',
                           max_instances=1, coalesce=True)
-        scheduler.add_job(poll_bale, IntervalTrigger(seconds=5), id='poll_bale',
+        scheduler.add_job(poll_bale, IntervalTrigger(seconds=8), id='poll_bale',
                           max_instances=1, coalesce=True)
 
         # Publish queue — every 60 seconds
@@ -322,7 +329,7 @@ def start_scheduler():
 
         scheduler.start()
         _started = True
-        logger.info('[Scheduler] Started in process %s — bot polling every 1s', os.getpid())
+        logger.info('[Scheduler] Started in process %s — bot polling every 8s', os.getpid())
         return scheduler
     except Exception as e:
         logger.exception('[Scheduler] Failed to start')

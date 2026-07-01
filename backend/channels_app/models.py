@@ -35,6 +35,8 @@ class ChannelVerification(models.Model):
     workspace = models.ForeignKey('workspaces.Workspace', on_delete=models.CASCADE)
     requested_by = models.ForeignKey('users.User', on_delete=models.CASCADE)
     platform = models.CharField(max_length=20, choices=[('telegram', 'Telegram'), ('bale', 'Bale')])
+    name = models.CharField(max_length=255, default='')
+    channel_type = models.CharField(max_length=20, choices=PublishChannel.TYPE_CHOICES, default='channel')
     token = models.CharField(max_length=20, unique=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     channel = models.ForeignKey(PublishChannel, on_delete=models.SET_NULL, null=True, blank=True)

@@ -66,6 +66,8 @@ def verify_start(request, workspace_id):
         workspace_id=workspace_id,
         requested_by=request.user,
         platform=platform,
+        name=channel_name,
+        channel_type=channel_type,
         token=token,
         expires_at=timezone.now() + timedelta(minutes=10)
     )
