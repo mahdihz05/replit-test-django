@@ -57,6 +57,12 @@ def _publish_to_channel(channel, title, body, content_obj):
     elif channel.platform == 'website':
         from .publishers import website as ws_pub
         return ws_pub.publish(channel, content_obj)
+    elif channel.platform == 'linkedin':
+        from .publishers import linkedin as li_pub
+        return li_pub.publish(channel, content_obj)
+    elif channel.platform == 'wordpress':
+        from .publishers import wordpress as wp_pub
+        return wp_pub.publish(channel, content_obj)
 
     return False, 'پلتفرم پشتیبانی نمی‌شود', None
 

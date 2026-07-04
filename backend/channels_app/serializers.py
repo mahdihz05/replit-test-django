@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PublishChannel, ChannelVerification
+from .models import PublishChannel, ChannelVerification, LinkedInConnection, WordPressConnection
 
 
 class PublishChannelSerializer(serializers.ModelSerializer):
@@ -13,3 +13,16 @@ class ChannelVerificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChannelVerification
         fields = ['id', 'platform', 'name', 'channel_type', 'token', 'status', 'expires_at', 'created_at']
+
+
+class LinkedInConnectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LinkedInConnection
+        fields = ['id', 'platform_target', 'person_urn', 'organization_urn', 'status',
+                  'access_token_expires_at', 'refresh_token_expires_at', 'connected_at', 'is_active']
+
+
+class WordPressConnectionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WordPressConnection
+        fields = ['id', 'site_url', 'wp_username', 'status', 'connected_at', 'is_active']

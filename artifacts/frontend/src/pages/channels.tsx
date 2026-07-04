@@ -16,7 +16,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Send, Share2, CheckCircle2, XCircle, Clock, Copy, RefreshCw,
-  Trash2, Zap, AlertCircle, Loader2
+  Trash2, Zap, AlertCircle, Loader2, Globe, Linkedin
 } from "lucide-react";
 
 interface Channel {
@@ -29,6 +29,7 @@ interface Channel {
   is_verified: boolean;
   is_active: boolean;
   created_at: string;
+  extra_data?: Record<string, any>;
 }
 
 interface VerificationData {
@@ -43,12 +44,27 @@ interface VerificationData {
   channel?: Channel;
 }
 
-const PLATFORM_NAMES: Record<string, string> = { telegram: "تلگرام", bale: "بله" };
-const TYPE_NAMES: Record<string, string> = { channel: "کانال", group: "گروه" };
+const PLATFORM_NAMES: Record<string, string> = {
+  telegram: "تلگرام",
+  bale: "بله",
+  linkedin: "LinkedIn",
+  wordpress: "WordPress",
+  website: "وب‌سایت",
+};
+
+const TYPE_NAMES: Record<string, string> = {
+  channel: "کانال",
+  group: "گروه",
+  personal: "پروفایل شخصی",
+  organization: "صفحه سازمانی",
+  site: "سایت",
+};
 
 function getPlatformIcon(platform: string, size = "w-5 h-5") {
   if (platform === "telegram") return <Send className={`${size} text-blue-500`} />;
   if (platform === "bale") return <Share2 className={`${size} text-green-500`} />;
+  if (platform === "linkedin") return <Linkedin className={`${size} text-blue-700`} />;
+  if (platform === "wordpress") return <Globe className={`${size} text-blue-600`} />;
   return <Share2 className={`${size} text-muted-foreground`} />;
 }
 
@@ -97,12 +113,19 @@ export default function Channels() {
   // Modal state
   const [showModal, setShowModal] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-  const [platform, setPlatform] = useState<"telegram" | "bale">("telegram");
+  const [platform, setPlatform] = useState<"telegram" | "bale" | "linkedin" | "wordpress" | "">("");
   const [channelType, setChannelType] = useState<"channel" | "group">("channel");
   const [channelName, setChannelName] = useState("");
   const [verification, setVerification] = useState<VerificationData | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const popupRef = useRef<Window | null>(null);
+
+  // LinkedIn / WordPress
+  const [linkedinTarget, setLinkedinTarget] = useState<"personal" | "organization">("personal");
+  const [wpSiteUrl, setWpSiteUrl] = useState("");
+  const [oauthUrl, setOauthUrl] = useState<string | null>(null);
+  const [checkingConnection, setCheckingConnection] = useState(false);
 
   const fetchChannels = async () => {
     if (!selectedWorkspace) return;
@@ -122,6 +145,28 @@ export default function Channels() {
       fetchChannels();
     }
   }, [selectedWorkspace]);
+
+  // Listen for OAuth popup messages (LinkedIn & WordPress)
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (!event.data || typeof event.data !== "object") return;
+      // Accept messages only from the same origin as the app.
+      if (event.origin !== window.location.origin) return;
+      const { platform, success, message } = event.data;
+      if (!platform || (platform !== "linkedin" && platform !== "wordpress")) return;
+      if (popupRef.current && !popupRef.current.closed) {
+        popupRef.current.close();
+      }
+      if (success) {
+        setStep(4);
+        fetchChannels();
+      } else {
+        toast({ title: "خطا در اتصال", description: message || "اتصال ناموفق بود", variant: "destructive" });
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [selectedWorkspace, toast]);
 
   const stopPolling = () => {
     if (pollRef.current) {
@@ -154,13 +199,18 @@ export default function Channels() {
 
   const closeModal = () => {
     stopPolling();
+    if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
     setShowModal(false);
     setStep(1);
-    setPlatform("telegram");
+    setPlatform("");
     setChannelType("channel");
     setChannelName("");
     setVerification(null);
     setSubmitting(false);
+    setLinkedinTarget("personal");
+    setWpSiteUrl("");
+    setOauthUrl(null);
+    setCheckingConnection(false);
   };
 
   const handleStartVerification = async () => {
@@ -204,6 +254,84 @@ export default function Channels() {
     }
   };
 
+  const openOAuthPopup = (url: string) => {
+    const width = 600;
+    const height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    popupRef.current = window.open(
+      url,
+      "oauth",
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+  };
+
+  const handleLinkedinStart = async () => {
+    if (!selectedWorkspace) return;
+    setSubmitting(true);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/linkedin/connect/start/`, {
+        method: "POST",
+        data: { platform_target: linkedinTarget, origin: window.location.origin },
+      });
+      const url = res?.data?.authorization_url;
+      if (url) {
+        setOauthUrl(url);
+        openOAuthPopup(url);
+        setStep(3);
+      } else {
+        throw new Error(res?.error || "آدرس OAuth دریافت نشد");
+      }
+    } catch (e: any) {
+      toast({ title: "خطا", description: e.message || "شروع اتصال LinkedIn ناموفق بود", variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const checkForConnection = async () => {
+    if (!selectedWorkspace) return;
+    setCheckingConnection(true);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/channels/?platform=${platform}`);
+      const list = Array.isArray(res?.data) ? res.data : [];
+      if (list.length > 0) {
+        stopPolling();
+        setStep(4);
+        fetchChannels();
+      } else {
+        toast({ title: "هنوز متصل نشده", description: "هنوز اتصال تأیید نشده است. دوباره بررسی کنید." });
+      }
+    } catch (e: any) {
+      toast({ title: "خطا", description: e.message || "بررسی اتصال ناموفق بود", variant: "destructive" });
+    } finally {
+      setCheckingConnection(false);
+    }
+  };
+
+  const handleWordpressStart = async () => {
+    if (!selectedWorkspace || !wpSiteUrl.trim()) return;
+    setSubmitting(true);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/wordpress/connect/start/`, {
+        method: "POST",
+        data: { site_url: wpSiteUrl.trim(), origin: window.location.origin },
+      });
+      const url = res?.data?.authorization_url;
+      if (url) {
+        setOauthUrl(url);
+        openOAuthPopup(url);
+        setStep(3);
+      } else {
+        throw new Error(res?.error || "آدرس WordPress دریافت نشد");
+      }
+    } catch (e: any) {
+      toast({ title: "خطا", description: e.message || "شروع اتصال WordPress ناموفق بود", variant: "destructive" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleTestChannel = async (channel: Channel) => {
     if (!selectedWorkspace) return;
     setTestingId(channel.id);
@@ -240,6 +368,10 @@ export default function Channels() {
     navigator.clipboard.writeText(token);
     toast({ title: "کپی شد", description: "کد تأیید کپی شد" });
   };
+
+  const isBotPlatform = platform === "telegram" || platform === "bale";
+  const isLinkedIn = platform === "linkedin";
+  const isWordPress = platform === "wordpress";
 
   return (
     <div className="space-y-6">
@@ -295,11 +427,11 @@ export default function Channels() {
                     <XCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
                   )}
                 </div>
-                <div className="flex items-center gap-2 mt-2">
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <Badge variant="outline" className="text-xs">
                     {PLATFORM_NAMES[channel.platform] || channel.platform}
                   </Badge>
-                  {channel.channel_type && (
+                  {channel.channel_type && channel.channel_type !== "site" && (
                     <Badge variant="secondary" className="text-xs">
                       {TYPE_NAMES[channel.channel_type] || channel.channel_type}
                     </Badge>
@@ -316,8 +448,11 @@ export default function Channels() {
                 {channel.username && (
                   <p className="text-xs text-muted-foreground mb-3 dir-ltr text-right">@{channel.username}</p>
                 )}
+                {channel.external_id && channel.platform === "wordpress" && (
+                  <p className="text-xs text-muted-foreground mb-3 dir-ltr text-right">{channel.external_id}</p>
+                )}
                 <div className="flex items-center gap-2 flex-wrap">
-                  {channel.is_verified && (
+                  {channel.is_verified && (channel.platform === "telegram" || channel.platform === "bale") && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -357,8 +492,9 @@ export default function Channels() {
             <DialogTitle>افزودن کانال جدید</DialogTitle>
             <DialogDescription>
               {step === 1 && "پلتفرم مورد نظر خود را انتخاب کنید"}
-              {step === 2 && "اطلاعات کانال را وارد کنید"}
-              {step === 3 && "کد زیر را در کانال خود ارسال کنید"}
+              {step === 2 && "اطلاعات اتصال را وارد کنید"}
+              {step === 3 && (isLinkedIn || isWordPress) && "تأیید را در پنجره بازشو کامل کنید"}
+              {step === 3 && isBotPlatform && "کد زیر را در کانال خود ارسال کنید"}
               {step === 4 && "کانال با موفقیت تأیید شد!"}
             </DialogDescription>
           </DialogHeader>
@@ -366,21 +502,26 @@ export default function Channels() {
           {step === 1 && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                {(["telegram", "bale"] as const).map(p => (
+                {([
+                  ["telegram", "تلگرام"],
+                  ["bale", "بله"],
+                  ["linkedin", "LinkedIn"],
+                  ["wordpress", "WordPress"],
+                ] as const).map(([p, label]) => (
                   <button
                     key={p}
                     onClick={() => { setPlatform(p); setStep(2); }}
                     className={`flex flex-col items-center gap-3 p-6 rounded-lg border-2 transition-all hover:border-primary hover:bg-primary/5 ${platform === p ? "border-primary bg-primary/5" : "border-border"}`}
                   >
                     {getPlatformIcon(p, "w-10 h-10")}
-                    <span className="font-medium">{PLATFORM_NAMES[p]}</span>
+                    <span className="font-medium">{label}</span>
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {step === 2 && (
+          {step === 2 && isBotPlatform && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
                 {getPlatformIcon(platform)}
@@ -429,7 +570,113 @@ export default function Channels() {
             </div>
           )}
 
-          {step === 3 && verification && (
+          {step === 2 && isLinkedIn && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                {getPlatformIcon("linkedin")}
+                <span className="text-sm font-medium">LinkedIn</span>
+              </div>
+
+              <div className="space-y-2">
+                <Label>هدف انتشار</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["personal", "organization"] as const).map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setLinkedinTarget(t)}
+                      className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${linkedinTarget === t ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-muted-foreground"}`}
+                    >
+                      {TYPE_NAMES[t]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
+                  برگشت
+                </Button>
+                <Button
+                  onClick={handleLinkedinStart}
+                  disabled={submitting}
+                  className="flex-1 gap-2"
+                >
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Linkedin className="w-4 h-4" />}
+                  اتصال به LinkedIn
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && isWordPress && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                {getPlatformIcon("wordpress")}
+                <span className="text-sm font-medium">WordPress</span>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="wp-url">آدرس سایت (URL)</Label>
+                <Input
+                  id="wp-url"
+                  placeholder="https://example.com"
+                  value={wpSiteUrl}
+                  onChange={e => setWpSiteUrl(e.target.value)}
+                  className="dir-ltr"
+                />
+                <p className="text-xs text-muted-foreground">
+                  باید سایت وردپرس اختصاصی (self-hosted) یا پلن Business وردپرس کام باشد.
+                </p>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
+                  برگشت
+                </Button>
+                <Button
+                  onClick={handleWordpressStart}
+                  disabled={!wpSiteUrl.trim() || submitting}
+                  className="flex-1 gap-2"
+                >
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Globe className="w-4 h-4" />}
+                  دریافت مجوز
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (isLinkedIn || isWordPress) && (
+            <div className="space-y-5">
+              <div className="rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 p-4 text-center space-y-2">
+                <p className="text-sm font-medium">پنجره {PLATFORM_NAMES[platform]} باز شد</p>
+                <p className="text-xs text-muted-foreground">
+                  پس از ورود و تأیید دسترسی، این پنجره به‌صورت خودکار بسته می‌شود.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                در انتظار تأیید...
+              </div>
+
+              <Button
+                onClick={checkForConnection}
+                disabled={checkingConnection}
+                className="w-full gap-2"
+              >
+                {checkingConnection ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                بررسی دستی
+              </Button>
+
+              {oauthUrl && (
+                <Button variant="outline" className="w-full" onClick={() => openOAuthPopup(oauthUrl)}>
+                  باز کردن دوباره پنجره
+                </Button>
+              )}
+            </div>
+          )}
+
+          {step === 3 && isBotPlatform && verification && (
             <div className="space-y-5">
               <VerificationCountdown expiresAt={verification.expires_at} />
 
@@ -477,7 +724,7 @@ export default function Channels() {
               <div>
                 <h3 className="font-semibold text-lg">کانال با موفقیت متصل شد!</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  {verification?.channel?.name || channelName} به سامانه اضافه شد
+                  {verification?.channel?.name || channelName || "کانال"} به سامانه اضافه شد
                 </p>
               </div>
               <Button onClick={closeModal} className="w-full">

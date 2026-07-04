@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Share2, CheckCircle2, XCircle, Clock, Loader2, Search,
-  FileText, Edit3, RadioIcon, CalendarIcon, AlertCircle
+  FileText, Edit3, RadioIcon, CalendarIcon, AlertCircle, Linkedin, Globe
 } from "lucide-react";
 
 interface Channel {
@@ -39,9 +39,27 @@ interface PublishResult {
   message_id?: string;
 }
 
+const PLATFORM_NAMES: Record<string, string> = {
+  telegram: "تلگرام",
+  bale: "بله",
+  linkedin: "LinkedIn",
+  wordpress: "WordPress",
+  website: "وب‌سایت",
+};
+
+const TYPE_NAMES: Record<string, string> = {
+  channel: "کانال",
+  group: "گروه",
+  personal: "پروفایل شخصی",
+  organization: "صفحه سازمانی",
+  site: "سایت",
+};
+
 function getPlatformIcon(platform: string) {
   if (platform === "telegram") return <Send className="w-4 h-4 text-blue-500" />;
   if (platform === "bale") return <Share2 className="w-4 h-4 text-green-500" />;
+  if (platform === "linkedin") return <Linkedin className="w-4 h-4 text-blue-700" />;
+  if (platform === "wordpress") return <Globe className="w-4 h-4 text-blue-600" />;
   return <Share2 className="w-4 h-4 text-muted-foreground" />;
 }
 
@@ -310,7 +328,7 @@ export default function Publish() {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{ch.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {ch.platform === "telegram" ? "تلگرام" : "بله"} · {ch.channel_type === "channel" ? "کانال" : "گروه"}
+                          {PLATFORM_NAMES[ch.platform] || ch.platform} · {TYPE_NAMES[ch.channel_type] || ch.channel_type}
                         </p>
                       </div>
                     </button>

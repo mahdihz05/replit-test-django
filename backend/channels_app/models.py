@@ -6,8 +6,22 @@ from django.utils import timezone
 
 
 class PublishChannel(models.Model):
-    PLATFORM_CHOICES = [('telegram', 'Telegram'), ('bale', 'Bale'), ('website', 'Website')]
-    TYPE_CHOICES = [('channel', 'Channel'), ('group', 'Group'), ('supergroup', 'Supergroup'), ('page', 'Page')]
+    PLATFORM_CHOICES = [
+        ('telegram', 'Telegram'),
+        ('bale', 'Bale'),
+        ('website', 'Website'),
+        ('linkedin', 'LinkedIn'),
+        ('wordpress', 'WordPress'),
+    ]
+    TYPE_CHOICES = [
+        ('channel', 'Channel'),
+        ('group', 'Group'),
+        ('supergroup', 'Supergroup'),
+        ('page', 'Page'),
+        ('personal', 'Personal Profile'),
+        ('organization', 'Company Page'),
+        ('site', 'Website'),
+    ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     workspace = models.ForeignKey('workspaces.Workspace', on_delete=models.CASCADE, related_name='channels')
@@ -54,3 +68,49 @@ class ChannelVerification(models.Model):
 
     def is_valid(self):
         return self.status == 'pending' and self.expires_at > timezone.now()
+
+
+class LinkedInConnection(models.Model):
+    STATUS_CHOICES = [('active', 'Active'), ('needs_reauth', 'Needs Reauth'), ('disconnected', 'Disconnected')]
+    TARGET_CHOICES = [('personal', 'Personal'), ('organization', 'Organization')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey('workspaces.Workspace', on_delete=models.CASCADE, related_name='linkedin_connections')
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='linkedin_connections')
+    platform_target = models.CharField(max_length=20, choices=TARGET_CHOICES, default='personal')
+    person_urn = models.CharField(max_length=255, blank=True)
+    organization_urn = models.CharField(max_length=255, blank=True)
+    access_token = models.TextField()
+    refresh_token = models.TextField(blank=True)
+    access_token_expires_at = models.DateTimeField(null=True, blank=True)
+    refresh_token_expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    connected_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'channels_linkedinconnection'
+
+    def __str__(self):
+        return f'LinkedIn {self.platform_target} for {self.workspace}'
+
+
+class WordPressConnection(models.Model):
+    STATUS_CHOICES = [('active', 'Active'), ('invalid', 'Invalid'), ('disconnected', 'Disconnected')]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey('workspaces.Workspace', on_delete=models.CASCADE, related_name='wordpress_connections')
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='wordpress_connections')
+    site_url = models.URLField(max_length=500)
+    wp_username = models.CharField(max_length=255)
+    application_password = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    connected_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'channels_wordpressconnection'
+        unique_together = ('workspace', 'site_url')
+
+    def __str__(self):
+        return f'WordPress {self.site_url} for {self.workspace}'

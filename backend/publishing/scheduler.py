@@ -6,6 +6,7 @@ import requests as req_lib
 from datetime import timedelta
 from django.utils import timezone
 from django.conf import settings
+from .publishers.linkedin import refresh_all_linkedin_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,7 @@ def _api_call(platform, token, method, payload):
 
 def process_publish_queue():
     from .models import PublishJob, PublishLog
+    from .publishers import linkedin
 
     now = timezone.now()
     jobs = (
@@ -197,6 +199,19 @@ def process_publish_queue():
         job.status = 'processing'
         job.started_at = now
         job.save()
+
+        # Refresh LinkedIn token before attempting if it is close to expiry
+        if job.channel.platform == 'linkedin':
+            from channels_app.models import LinkedInConnection
+            try:
+                conn = LinkedInConnection.objects.get(
+                    workspace=job.channel.workspace,
+                    platform_target=job.channel.channel_type or 'personal',
+                    is_active=True,
+                )
+                linkedin.refresh_token_if_needed(conn)
+            except LinkedInConnection.DoesNotExist:
+                pass
 
         success, error_type, error_msg = attempt_publish(job)
         job.attempt_count += 1
@@ -215,7 +230,12 @@ def process_publish_queue():
             )
             if job.attempt_count < job.max_attempts:
                 job.status = 'queued'
-                job.next_retry_at = timezone.now() + timedelta(minutes=5 * job.attempt_count)
+                if error_type == 'rate_limit':
+                    # Defer rate-limited jobs to the next day (same time) to avoid
+                    # hitting daily platform caps (e.g. LinkedIn ~100 posts/day).
+                    job.next_retry_at = timezone.now() + timedelta(days=1)
+                else:
+                    job.next_retry_at = timezone.now() + timedelta(minutes=5 * job.attempt_count)
             else:
                 job.status = 'failed'
 
@@ -237,6 +257,12 @@ def attempt_publish(job):
     elif channel.platform == 'website':
         from .publishers import website
         return website.publish(channel, content)
+    elif channel.platform == 'linkedin':
+        from .publishers import linkedin
+        return linkedin.publish(channel, content)
+    elif channel.platform == 'wordpress':
+        from .publishers import wordpress
+        return wordpress.publish(channel, content)
 
     return False, 'unknown', 'Unknown platform'
 
@@ -326,6 +352,8 @@ def start_scheduler():
         scheduler.add_job(process_retries, IntervalTrigger(minutes=5), id='retries')
         scheduler.add_job(expire_otp_codes, IntervalTrigger(hours=1), id='expire_otp')
         scheduler.add_job(expire_verifications, IntervalTrigger(hours=1), id='expire_verifications')
+        scheduler.add_job(refresh_all_linkedin_tokens, IntervalTrigger(hours=24), id='linkedin_refresh',
+                          max_instances=1, coalesce=True)
 
         scheduler.start()
         _started = True
