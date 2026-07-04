@@ -5,11 +5,20 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('SECRET_KEY') or os.environ.get('SESSION_SECRET', 'django-insecure-dev-key-change-in-production')
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+_secret = os.environ.get('SECRET_KEY') or os.environ.get('SESSION_SECRET')
+if not _secret:
+    raise RuntimeError("SECRET_KEY or SESSION_SECRET environment variable must be set")
+SECRET_KEY = _secret
 
-ALLOWED_HOSTS = ['*']
-ALLOWED_HOSTS += os.environ.get('ALLOWED_HOSTS', '').split(',')
+DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+
+_allowed = os.environ.get('ALLOWED_HOSTS', '')
+if _allowed:
+    ALLOWED_HOSTS = [h for h in _allowed.split(',') if h]
+else:
+    # Dev: allow all hosts (Replit proxies requests through its own domain).
+    # Production: set ALLOWED_HOSTS env var to your actual domain.
+    ALLOWED_HOSTS = ['*']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -114,8 +123,14 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
+_cors_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS = [o for o in _cors_origins.split(',') if o]
+    CORS_ALLOW_CREDENTIALS = True
+else:
+    # Dev fallback: allow all origins but disable credentials to avoid CSRF risk
+    CORS_ALLOW_ALL_ORIGINS = True
+    CORS_ALLOW_CREDENTIALS = False
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')

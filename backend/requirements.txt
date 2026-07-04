@@ -12,3 +12,4 @@ jdatetime>=4.1
 requests>=2.31
 dj-database-url>=2.1
 django-filter>=23.0
+cryptography>=42.0
