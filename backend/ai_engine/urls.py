@@ -17,6 +17,7 @@ ai_urlpatterns = [
     path('<uuid:workspace_id>/ai/generate/bundle/', views.generate_bundle),
     path('<uuid:workspace_id>/ai/generate/multi-variant/', views.generate_multi_variant),
     path('<uuid:workspace_id>/ai/generate/items/<uuid:item_id>/save/', views.save_generated_item),
+    path('<uuid:workspace_id>/ai/generate/items/<uuid:item_id>/regenerate-image/', views.regenerate_image_for_item),
 ]
 
 urlpatterns = ai_urlpatterns

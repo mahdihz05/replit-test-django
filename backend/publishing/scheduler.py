@@ -228,7 +228,10 @@ def process_publish_queue():
             log.user_message = PublishLog.USER_MESSAGES.get(
                 error_type, PublishLog.USER_MESSAGES['unknown']
             )
-            if job.attempt_count < job.max_attempts:
+            # Non-retriable errors: unsupported media should not be retried
+            if error_type == 'unsupported_media':
+                job.status = 'failed'
+            elif job.attempt_count < job.max_attempts:
                 job.status = 'queued'
                 if error_type == 'rate_limit':
                     # Defer rate-limited jobs to the next day (same time) to avoid
@@ -247,22 +250,30 @@ def process_publish_queue():
 def attempt_publish(job):
     channel = job.channel
     content = job.content
+    attachments = []
+    for att in job.attachments.filter(is_active=True):
+        attachments.append({
+            'media_type': att.media_type,
+            'file_path': att.file_path,
+            'mime_type': att.mime_type,
+            'original_filename': att.original_filename,
+        })
 
     if channel.platform == 'telegram':
         from .publishers import telegram
-        return telegram.publish(channel, content)
+        return telegram.publish(channel, content, attachments=attachments)
     elif channel.platform == 'bale':
         from .publishers import bale
-        return bale.publish(channel, content)
+        return bale.publish(channel, content, attachments=attachments)
     elif channel.platform == 'website':
         from .publishers import website
-        return website.publish(channel, content)
+        return website.publish(channel, content, attachments=attachments)
     elif channel.platform == 'linkedin':
         from .publishers import linkedin
-        return linkedin.publish(channel, content)
+        return linkedin.publish(channel, content, attachments=attachments)
     elif channel.platform == 'wordpress':
         from .publishers import wordpress
-        return wordpress.publish(channel, content)
+        return wordpress.publish(channel, content, attachments=attachments)
 
     return False, 'unknown', 'Unknown platform'
 

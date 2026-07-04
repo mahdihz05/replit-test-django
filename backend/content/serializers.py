@@ -11,15 +11,21 @@ class ContentVersionSerializer(serializers.ModelSerializer):
 class ContentSerializer(serializers.ModelSerializer):
     created_by_phone = serializers.CharField(source='created_by.phone_number', read_only=True)
     image_url = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
 
     class Meta:
         model = Content
         fields = [
             'id', 'title', 'body', 'status', 'language', 'goal', 'tags',
-            'image', 'image_url', 'scheduled_at', 'published_at',
+            'image', 'image_url', 'attachments', 'scheduled_at', 'published_at',
             'created_by', 'created_by_phone', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'published_at']
+
+    def get_attachments(self, obj):
+        from publishing.serializers import PublishAttachmentSerializer
+        qs = obj.attachments.filter(is_active=True)
+        return PublishAttachmentSerializer(qs, many=True).data
 
     def get_image_url(self, obj):
         if obj.image:

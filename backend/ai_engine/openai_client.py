@@ -163,6 +163,42 @@ def generate_image(description, style=''):
         return None, str(e)
 
 
+def generate_image_prompt(source_text, max_words=25):
+    """Ask GPT-4o to write a short English DALL-E prompt from the given Persian text."""
+    client = get_openai_client()
+    if not client or not settings.OPENAI_API_KEY:
+        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
+
+    try:
+        response = client.chat.completions.create(
+            model='gpt-4o',
+            messages=[
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are an expert image prompt engineer. Based on the text provided, '
+                        'write a concise, vivid English image generation prompt suitable for DALL-E 3. '
+                        f'Maximum {max_words} words. Return only the prompt, no extra explanation.'
+                    )
+                },
+                {'role': 'user', 'content': source_text[:2000]},
+            ]
+        )
+        prompt = response.choices[0].message.content.strip()
+        tokens = response.usage.total_tokens
+        return prompt, None, tokens
+    except Exception as e:
+        return None, str(e), 0
+
+
+def generate_image_from_text(source_text, style=''):
+    """Two-step image generation: create a DALL-E prompt from text, then generate image."""
+    prompt, error, _ = generate_image_prompt(source_text)
+    if error:
+        return None, error
+    return generate_image(prompt, style=style)
+
+
 def generate_summary(text, length='brief'):
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:

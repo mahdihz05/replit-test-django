@@ -30,6 +30,12 @@ class GenerationBatch(models.Model):
     variant_count = models.PositiveSmallIntegerField(null=True, blank=True)
     wallet_cost_charged = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    image_status = models.CharField(
+        max_length=20,
+        choices=[('pending', 'Pending'), ('success', 'Success'), ('failed', 'Failed')],
+        blank=True,
+        default=''
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
 
@@ -48,13 +54,15 @@ class GeneratedItem(models.Model):
         ('hashtags', 'هشتگ‌ها'),
         ('title', 'عنوان'),
         ('variant', 'نسخه'),
+        ('image', 'تصویر'),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     batch = models.ForeignKey(GenerationBatch, on_delete=models.CASCADE, related_name='items')
     item_type = models.CharField(max_length=20, choices=ITEM_TYPE_CHOICES)
     order = models.PositiveSmallIntegerField(default=0)
-    content = models.TextField()
+    content = models.TextField(blank=True)
+    image = models.ImageField(upload_to='content/images/', null=True, blank=True)
     saved_as_draft = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

@@ -2,7 +2,7 @@ import requests
 from django.conf import settings
 
 
-def publish(channel, content):
+def publish(channel, content, attachments=None):
     try:
         extra = channel.extra_data or {}
         webhook_url = extra.get('webhook_url', '')

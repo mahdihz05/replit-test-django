@@ -3,18 +3,36 @@ from .models import AIChatSession, AIChatMessage, GenerationBatch, GeneratedItem
 
 
 class GeneratedItemSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
     class Meta:
         model = GeneratedItem
-        fields = ['id', 'item_type', 'order', 'content', 'saved_as_draft', 'created_at']
+        fields = ['id', 'item_type', 'order', 'content', 'image', 'image_url', 'saved_as_draft', 'created_at']
+
+    def get_image_url(self, obj):
+        if obj.image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
 
 
 class GenerationBatchSerializer(serializers.ModelSerializer):
     items = GeneratedItemSerializer(many=True, read_only=True)
+    image_item = serializers.SerializerMethodField()
 
     class Meta:
         model = GenerationBatch
         fields = ['id', 'mode', 'capability', 'topic', 'tone', 'platform',
-                  'variant_count', 'status', 'wallet_cost_charged', 'created_at', 'items']
+                  'variant_count', 'status', 'image_status', 'wallet_cost_charged',
+                  'created_at', 'items', 'image_item']
+
+    def get_image_item(self, obj):
+        image = obj.items.filter(item_type='image').first()
+        if image:
+            return GeneratedItemSerializer(image, context=self.context).data
+        return None
 
 
 class AIChatMessageSerializer(serializers.ModelSerializer):

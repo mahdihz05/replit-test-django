@@ -40,6 +40,51 @@ def deduct_wallet(wallet, cost, description):
     )
 
 
+def _create_batch_and_text_item(workspace_id, user, mode, capability, request_data, text_content):
+    """Create a GenerationBatch + text GeneratedItem for standard modes that opt-in to image."""
+    batch = GenerationBatch.objects.create(
+        workspace_id=workspace_id,
+        user=user,
+        mode=mode,
+        capability=capability,
+        topic=request_data.get('topic', request_data.get('goal', request_data.get('niche', request_data.get('text', '')))),
+        tone=request_data.get('tone', 'حرفه‌ای'),
+        platform=request_data.get('platform', ''),
+        variant_count=None,
+    )
+    item = GeneratedItem.objects.create(
+        batch=batch,
+        item_type='full_text',
+        order=0,
+        content=text_content
+    )
+    return batch, item
+
+
+def _generate_image_for_batch(batch, source_text, wallet, cost):
+    """Generate a DALL-E image from source text and attach it to the batch as a GeneratedItem."""
+    batch.image_status = 'pending'
+    batch.save(update_fields=['image_status'])
+    image_path, error = openai_client.generate_image_from_text(source_text)
+    if error or not image_path:
+        batch.image_status = 'failed'
+        batch.save(update_fields=['image_status'])
+        return None, error or 'تولید تصویر با خطا مواجه شد'
+
+    image_item = GeneratedItem.objects.create(
+        batch=batch,
+        item_type='image',
+        order=99,
+        content='',
+        image=image_path
+    )
+    batch.image_status = 'success'
+    batch.save(update_fields=['image_status'])
+    if wallet and cost:
+        deduct_wallet(wallet, cost, f'تولید تصویر - {batch.topic[:50]}')
+    return image_item, None
+
+
 @api_view(['POST', 'GET'])
 @permission_classes([IsAuthenticated])
 def chat_sessions(request, workspace_id):
@@ -152,6 +197,23 @@ def generate_text(request, workspace_id):
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     deduct_wallet(wallet, cost, f'تولید متن - {goal[:50]}')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'text', request.data, result
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, image_error = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 
 
@@ -206,6 +268,23 @@ def rewrite_text(request, workspace_id):
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     deduct_wallet(wallet, cost, 'بازنویسی متن')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'rewrite', request.data, result
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 
 
@@ -231,6 +310,23 @@ def suggest_titles(request, workspace_id):
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     deduct_wallet(wallet, cost, f'پیشنهاد عنوان - {topic[:50]}')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'title', request.data, '\n'.join(result)
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, _ = _generate_image_for_batch(batch, topic, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'titles': result}})
 
 
@@ -256,6 +352,23 @@ def suggest_hashtags(request, workspace_id):
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     deduct_wallet(wallet, cost, f'پیشنهاد هشتگ - {topic[:50]}')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'hashtag', request.data, '\n'.join(result)
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, _ = _generate_image_for_batch(batch, topic, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'hashtags': result}})
 
 
@@ -277,6 +390,23 @@ def generate_summary(request, workspace_id):
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
     deduct_wallet(wallet, cost, 'خلاصه‌سازی متن')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'summary', request.data, result
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 
 
@@ -299,6 +429,23 @@ def generate_scenario(request, workspace_id):
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
     deduct_wallet(wallet, cost, f'سناریو محتوا - {topic[:50]}')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'scenario', request.data, result
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 
 
@@ -321,6 +468,23 @@ def generate_idea(request, workspace_id):
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
     deduct_wallet(wallet, cost, f'ایده محتوا - {niche[:50]}')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'idea', request.data, '\n'.join(result)
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, _ = _generate_image_for_batch(batch, niche, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'ideas': result, 'tokens': tokens}})
 
 
@@ -346,6 +510,23 @@ def generate_cta(request, workspace_id):
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     deduct_wallet(wallet, cost, f'تولید CTA - {goal[:50]}')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            batch, item = _create_batch_and_text_item(
+                workspace_id, request.user, 'standard', 'cta', request.data, '\n'.join(result)
+            )
+            batch.status = 'success'
+            batch.wallet_cost_charged = cost
+            batch.save(update_fields=['status', 'wallet_cost_charged'])
+            image_item, _ = _generate_image_for_batch(batch, goal, image_wallet, image_cost)
+            items = [item]
+            if image_item:
+                items.append(image_item)
+            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+
     return Response({'success': True, 'data': {'ctas': result}})
 
 
@@ -433,6 +614,19 @@ def generate_bundle(request, workspace_id):
     batch.wallet_cost_charged = cost
     batch.save()
     deduct_wallet(wallet, cost, f'بازتولید همزمان - {topic[:50]}')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            image_source = result.get('full_text') or result.get('title') or topic
+            image_item, image_error = _generate_image_for_batch(batch, image_source, image_wallet, image_cost)
+            if image_error:
+                batch.image_status = 'failed'
+                batch.save(update_fields=['image_status'])
+            if image_item:
+                items.append(image_item)
+
     return _items_response(batch, items)
 
 
@@ -494,7 +688,59 @@ def generate_multi_variant(request, workspace_id):
     batch.wallet_cost_charged = cost
     batch.save()
     deduct_wallet(wallet, cost, f'تولید چندگزینه‌ای {capability} - {variant_count} نسخه')
+
+    if request.data.get('generate_image'):
+        image_cost = settings.WALLET_COSTS['image_generation']
+        image_wallet, image_err = check_wallet(workspace_id, image_cost)
+        if not image_err:
+            image_source = batch.topic
+            image_item, image_error = _generate_image_for_batch(batch, image_source, image_wallet, image_cost)
+            if image_error:
+                batch.image_status = 'failed'
+                batch.save(update_fields=['image_status'])
+            if image_item:
+                items.append(image_item)
+
     return _items_response(batch, items)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def regenerate_image_for_item(request, workspace_id, item_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        item = GeneratedItem.objects.get(
+            id=item_id,
+            batch__workspace_id=workspace_id,
+            batch__user=request.user,
+            batch__is_active=True
+        )
+    except GeneratedItem.DoesNotExist:
+        return Response({'success': False, 'error': 'آیتم یافت نشد', 'code': 'NOT_FOUND'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    if item.item_type != 'variant':
+        return Response({'success': False, 'error': 'فقط برای نسخه‌های چندگزینه‌ای قابل تولید مجدد است', 'code': 'INVALID_TYPE'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    cost = settings.WALLET_COSTS['image_generation']
+    wallet, err = check_wallet(workspace_id, cost)
+    if err:
+        return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
+                        status=status.HTTP_402_PAYMENT_REQUIRED)
+
+    image_item, image_error = _generate_image_for_batch(
+        item.batch, item.content, wallet, cost
+    )
+    if image_error:
+        return Response({'success': False, 'error': image_error, 'code': 'AI_ERROR'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    return Response({'success': True, 'data': GeneratedItemSerializer(image_item, context={'request': request}).data})
 
 
 @api_view(['POST'])
@@ -523,6 +769,13 @@ def save_generated_item(request, workspace_id, item_id):
     if item.item_type == 'title':
         title = item.content[:100]
 
+    include_image = request.data.get('include_image', False)
+    image = None
+    if include_image:
+        image = item.batch.items.filter(item_type='image').first()
+        if not image:
+            image = item.image if item.item_type == 'image' else None
+
     from content.models import Content
     content = Content.objects.create(
         workspace_id=workspace_id,
@@ -533,6 +786,10 @@ def save_generated_item(request, workspace_id, item_id):
         language='fa',
         goal=item.batch.topic[:300]
     )
+
+    if image and image.image:
+        content.image = image.image
+        content.save(update_fields=['image'])
 
     item.saved_as_draft = True
     item.save()

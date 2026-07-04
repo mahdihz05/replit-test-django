@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import {
   Send, Share2, CheckCircle2, XCircle, Clock, Loader2, Search,
-  FileText, Edit3, RadioIcon, CalendarIcon, AlertCircle, Linkedin, Globe
+  FileText, Edit3, RadioIcon, CalendarIcon, AlertCircle, Linkedin, Globe,
+  Image, Paperclip, X, FileVideo, FileAudio, File
 } from "lucide-react";
 
 interface Channel {
@@ -22,19 +23,32 @@ interface Channel {
   is_verified: boolean;
 }
 
+interface PublishAttachment {
+  id: string;
+  media_type: "image" | "video" | "voice" | "document";
+  file_path: string;
+  file_url?: string;
+  original_filename: string;
+  file_size_bytes: number;
+  mime_type?: string;
+}
+
 interface Content {
   id: string;
   title: string;
   body: string;
   status: string;
   created_at: string;
+  image?: string;
+  image_url?: string;
+  attachments?: PublishAttachment[];
 }
 
 interface PublishResult {
   channel_id: string;
   channel_name: string;
   platform: string;
-  status: "success" | "failed";
+  status: "success" | "failed" | "skipped";
   error?: string;
   message_id?: string;
 }
@@ -46,6 +60,45 @@ const PLATFORM_NAMES: Record<string, string> = {
   wordpress: "WordPress",
   website: "وب‌سایت",
 };
+
+const MEDIA_LIMITS: Record<string, { label: string; bytes: number }> = {
+  telegram: { label: "۵۰ مگابایت", bytes: 50 * 1024 * 1024 },
+  bale: { label: "۵۰ مگابایت", bytes: 50 * 1024 * 1024 },
+  linkedin: { label: "۵ گیگابایت (ویدیو)", bytes: 5 * 1024 * 1024 * 1024 },
+  wordpress: { label: "بستگی به تنظیمات وردپرس", bytes: 100 * 1024 * 1024 },
+};
+
+const SUPPORTED_MEDIA: Record<string, Set<string>> = {
+  telegram: new Set(["image", "video", "voice", "document"]),
+  bale: new Set(["image", "video", "voice", "document"]),
+  linkedin: new Set(["image", "video", "document"]),
+  wordpress: new Set(["image", "video", "voice", "document"]),
+  website: new Set([]),
+};
+
+function guessMediaType(filename: string, mimeType: string): string {
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "voice";
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  if (["jpg", "jpeg", "png", "gif", "webp", "bmp"].includes(ext)) return "image";
+  if (["mp4", "mov", "avi", "mkv", "webm"].includes(ext)) return "video";
+  if (["mp3", "ogg", "wav", "m4a", "aac", "oga"].includes(ext)) return "voice";
+  return "document";
+}
+
+function getMediaIcon(mediaType: string) {
+  if (mediaType === "image") return <Image className="w-4 h-4" />;
+  if (mediaType === "video") return <FileVideo className="w-4 h-4" />;
+  if (mediaType === "voice") return <FileAudio className="w-4 h-4" />;
+  return <File className="w-4 h-4" />;
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes) return "0 B";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const TYPE_NAMES: Record<string, string> = {
   channel: "کانال",
@@ -79,6 +132,8 @@ export default function Publish() {
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
   const [publishType, setPublishType] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [attachments, setAttachments] = useState<PublishAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
@@ -95,6 +150,14 @@ export default function Publish() {
     }).finally(() => setLoadingData(false));
   }, [selectedWorkspace]);
 
+  useEffect(() => {
+    // Auto-attach the draft image when a content with image is selected, but only if not already present
+    if (contentTab === "saved" && selectedContent?.image_url && !attachments.some(a => a.file_path === selectedContent.image)) {
+      handleAutoAttachImage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedContent, contentTab]);
+
   const filteredContents = contents.filter(c =>
     c.title?.toLowerCase().includes(contentSearch.toLowerCase()) ||
     c.body?.toLowerCase().includes(contentSearch.toLowerCase())
@@ -106,11 +169,56 @@ export default function Publish() {
     );
   };
 
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id));
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || !selectedWorkspace) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const mediaType = guessMediaType(file.name, file.type);
+        const form = new FormData();
+        form.append("file", file);
+        form.append("media_type", mediaType);
+        const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/publish/attachments/`, {
+          method: "POST",
+          data: form,
+        });
+        if (res?.data) {
+          setAttachments(prev => [...prev, res.data]);
+        }
+      }
+    } catch (e: any) {
+      toast({ title: "خطا در آپلود", description: e.message || "خطا", variant: "destructive" });
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = "";
+    }
+  };
+
+  const handleAutoAttachImage = async () => {
+    if (!selectedContent || !selectedWorkspace) return;
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/publish/attachments/from-content/`, {
+        method: "POST",
+        data: { content_id: selectedContent.id },
+      });
+      if (res?.data) {
+        setAttachments(prev => [...prev, res.data]);
+      }
+    } catch (e: any) {
+      toast({ title: "خطا", description: e.message || "خطا در ضمیمه تصویر", variant: "destructive" });
+    }
+  };
+
   const canPublish = () => {
     const hasText = contentTab === "saved" ? !!selectedContent : customText.trim().length > 0;
     const hasChannels = selectedChannels.length > 0;
     const hasTime = publishType === "now" || !!scheduledAt;
-    return hasText && hasChannels && hasTime && !publishing;
+    return hasText && hasChannels && hasTime && !publishing && !uploading;
   };
 
   const handlePublish = async () => {
@@ -120,6 +228,7 @@ export default function Publish() {
 
     const payload: any = {
       channel_ids: selectedChannels,
+      attachments: attachments.map(a => ({ id: a.id, media_type: a.media_type })),
     };
 
     if (contentTab === "saved" && selectedContent) {
@@ -295,6 +404,72 @@ export default function Publish() {
               </CardContent>
             </Card>
           )}
+
+          {/* Attachments */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Paperclip className="w-4 h-4" /> رسانه‌های ضمیمه
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Button variant="outline" className="gap-2" asChild disabled={uploading}>
+                  <label>
+                    <Image className="w-4 h-4" /> {uploading ? "در حال آپلود..." : "افزودن فایل"}
+                    <input type="file" className="hidden" multiple onChange={handleFileUpload} disabled={uploading} />
+                  </label>
+                </Button>
+                {selectedContent?.image_url && !attachments.some(a => a.file_path === selectedContent.image) && (
+                  <Button variant="outline" className="gap-2" onClick={handleAutoAttachImage} disabled={uploading}>
+                    <Image className="w-4 h-4" /> تصویر پیش‌نویس
+                  </Button>
+                )}
+              </div>
+
+              {attachments.length === 0 ? (
+                <p className="text-sm text-muted-foreground">فایلی ضمیمه نشده است.</p>
+              ) : (
+                <div className="space-y-2">
+                  {attachments.map(att => (
+                    <div key={att.id} className="flex items-center gap-2 p-2 rounded-lg border bg-muted/30">
+                      {getMediaIcon(att.media_type)}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{att.original_filename}</p>
+                        <p className="text-xs text-muted-foreground">{formatBytes(att.file_size_bytes)} · {att.media_type}</p>
+                      </div>
+                      <button onClick={() => removeAttachment(att.id)} className="text-muted-foreground hover:text-destructive">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {selectedChannels.length > 0 && attachments.length > 0 && (
+                <div className="space-y-1 text-xs text-muted-foreground bg-muted/50 p-2 rounded-lg">
+                  <p className="font-medium text-foreground">محدودیت‌های پلتفرم:</p>
+                  {selectedChannels.map(chId => {
+                    const ch = channels.find(c => c.id === chId);
+                    if (!ch) return null;
+                    const unsupported = attachments.filter(a => !SUPPORTED_MEDIA[ch.platform]?.has(a.media_type));
+                    const limit = MEDIA_LIMITS[ch.platform];
+                    return (
+                      <div key={ch.id} className="flex flex-col gap-0.5">
+                        <span className="font-medium">{PLATFORM_NAMES[ch.platform]}:</span>
+                        {limit && <span>• حداکثر حجم: {limit.label}</span>}
+                        {unsupported.length > 0 && (
+                          <span className="text-amber-600">
+                            • {unsupported.map(a => a.media_type).join("، ")} در این پلتفرم پشتیبانی نمی‌شود و رد می‌شود.
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Right: Options */}

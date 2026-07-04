@@ -1,3 +1,4 @@
+import os
 import requests
 import logging
 import mimetypes
@@ -41,47 +42,76 @@ def _classify_error(err_text, status_code):
     return 'unknown', f'انتشار در وردپرس با خطا مواجه شد: {err_text}'
 
 
-def _upload_featured_media(connection, content):
-    if not content.image:
-        return None, None
+def _resolve_media_path_or_url(file_path):
+    if not file_path:
+        return None
+    if file_path.startswith('http'):
+        return file_path
+    return f"{settings.MEDIA_ROOT.rstrip('/')}/{file_path.lstrip('/')}"
 
-    image_url = f'{settings.MEDIA_URL}{content.image}'
+
+def _upload_media_to_wordpress(connection, file_path, original_filename, mime_type, media_type):
     try:
-        if image_url.startswith('http'):
-            media_resp = safe_get(image_url, timeout=30)
+        resolved_path = _resolve_media_path_or_url(file_path)
+        if not resolved_path:
+            return None, 'مسیر فایل نامعتبر است'
+        if resolved_path.startswith('http'):
+            media_resp = safe_get(resolved_path, timeout=30)
             if not media_resp.ok:
-                return None, f'خطا در دانلود تصویر: {media_resp.status_code}'
-            image_data = media_resp.content
-            content_type = media_resp.headers.get('Content-Type') or 'image/jpeg'
-            filename = urlparse(image_url).path.split('/')[-1] or 'image.jpg'
+                return None, f'خطا در دانلود فایل: {media_resp.status_code}'
+            file_data = media_resp.content
+            content_type = media_resp.headers.get('Content-Type') or mime_type or 'application/octet-stream'
+            filename = urlparse(resolved_path).path.split('/')[-1] or original_filename or 'file'
         else:
-            full_path = f'{settings.MEDIA_ROOT}{content.image}'
-            with open(full_path, 'rb') as f:
-                image_data = f.read()
-            content_type = mimetypes.guess_type(full_path)[0] or 'image/jpeg'
-            filename = full_path.split('/')[-1] or 'image.jpg'
+            with open(resolved_path, 'rb') as f:
+                file_data = f.read()
+            content_type = mime_type or mimetypes.guess_type(resolved_path)[0] or 'application/octet-stream'
+            filename = resolved_path.split('/')[-1] or original_filename or 'file'
 
         auth = _basic_auth(connection)
         resp = safe_post(
             _api_url(connection.site_url, 'wp/v2/media'),
             auth=auth,
-            files={
-                'file': (filename, image_data, content_type),
-            },
-            timeout=60,
+            files={'file': (filename, file_data, content_type)},
+            timeout=120,
         )
         if not resp.ok:
             try:
                 detail = resp.json()
             except Exception:
                 detail = resp.text
-            return None, f'آپلود تصویر شاخص شکست خورد: {detail}'
-        return resp.json().get('id'), None
+            return None, f'آپلود فایل شکست خورد: {detail}'
+        data = resp.json()
+        return {
+            'id': data.get('id'),
+            'url': data.get('source_url'),
+            'mime_type': data.get('mime_type'),
+            'media_type': media_type,
+        }, None
     except Exception as e:
-        return None, f'خطا در آپلود تصویر شاخص: {e}'
+        return None, f'خطا در آپلود فایل: {e}'
 
 
-def publish(channel, content):
+def _embed_wordpress_media(body, media_list):
+    """Append media embeds to post body."""
+    if not media_list:
+        return body
+    blocks = []
+    for m in media_list:
+        mt = m.get('media_type')
+        url = m.get('url') or ''
+        if mt == 'image':
+            blocks.append(f'<figure class="wp-block-image"><img src="{url}" alt="" /></figure>')
+        elif mt == 'video':
+            blocks.append(f'<figure class="wp-block-video"><video controls src="{url}"></video></figure>')
+        elif mt == 'voice':
+            blocks.append(f'<figure class="wp-block-audio"><audio controls src="{url}"></audio></figure>')
+        elif mt == 'document':
+            blocks.append(f'<p><a href="{url}" download>دانلود فایل</a></p>')
+    return body + '\n\n' + '\n\n'.join(blocks) if body else '\n\n'.join(blocks)
+
+
+def publish(channel, content, attachments=None):
     conn = _get_active_connection(channel)
     if not conn:
         return False, 'auth_error', 'اتصال وردپرس فعال یافت نشد. لطفاً ابتدا متصل شوید.'
@@ -92,10 +122,34 @@ def publish(channel, content):
         conn.save(update_fields=['status'])
         return False, 'auth_error', 'اعتبار اتصال وردپرس قابل خواندن نیست. لطفاً دوباره متصل شوید.'
 
-    media_id, err = _upload_featured_media(conn, content)
-    if err:
-        logger.warning(f'WordPress featured media upload failed: {err}')
-        # continue without featured media
+    attachments = attachments or []
+    media_list = []
+    for att in attachments:
+        file_path = att.get('file_path', '')
+        media_info, err = _upload_media_to_wordpress(
+            conn, file_path, att.get('original_filename'), att.get('mime_type'), att.get('media_type')
+        )
+        if err:
+            logger.warning(f'WordPress media upload failed: {err}')
+            continue
+        media_list.append(media_info)
+
+    # Legacy featured image fallback
+    featured_id = None
+    if content.image and not any(m.get('media_type') == 'image' for m in media_list):
+        image_path = _resolve_media_path_or_url(content.image.name)
+        if image_path:
+            media_info, err = _upload_media_to_wordpress(
+                conn, image_path,
+                os.path.basename(content.image.name), 'image/jpeg', 'image'
+            )
+            if media_info:
+                media_list.append(media_info)
+
+    if media_list:
+        first_image = next((m for m in media_list if m.get('media_type') == 'image'), None)
+        if first_image:
+            featured_id = first_image.get('id')
 
     body = content.body or ''
     if content.title and content.title not in ('untitled', ''):
@@ -103,13 +157,15 @@ def publish(channel, content):
     else:
         title = body[:100] if body else 'پست محتوایار'
 
+    body = _embed_wordpress_media(body, media_list)
+
     payload = {
         'title': title,
         'content': body,
         'status': 'publish',
     }
-    if media_id:
-        payload['featured_media'] = media_id
+    if featured_id:
+        payload['featured_media'] = featured_id
 
     # optionally attach categories/tags if available
     tags = content.tags or []

@@ -5,3 +5,4 @@
 - [Dashboard publish trends](dashboard-publish-trends.md) — count successful publishes by completion date, not creation date
 - [AI form field consistency](ai-form-field-consistency.md) — keep frontend input names aligned with existing backend parameters when extending forms
 - [OpenAI JSON retry validation](openai-json-retry-validation.md) — include JSON parsing and schema validation inside the OpenAI retry loop
+- [Media publishing path handling](media-publishing-lessons.md) — single canonical media path resolver, explicit workspace_id scoping, and Telegram media-group chunking

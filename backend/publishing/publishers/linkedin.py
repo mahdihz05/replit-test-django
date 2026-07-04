@@ -71,6 +71,15 @@ def _register_upload(access_token, owner_urn):
         return None, f'خطا در اتصال به LinkedIn: {e}'
 
 
+def _resolve_media_path_or_url(path_or_url):
+    if not path_or_url:
+        return None
+    if path_or_url.startswith('http'):
+        return path_or_url
+    from django.conf import settings
+    return f"{settings.MEDIA_ROOT.rstrip('/')}/{path_or_url.lstrip('/')}"
+
+
 def _upload_binary(upload_url, image_path_or_url):
     """Step 2: Upload binary image data to the uploadUrl."""
     try:
@@ -82,7 +91,10 @@ def _upload_binary(upload_url, image_path_or_url):
             content_type = media_resp.headers.get('Content-Type', 'image/jpeg')
         else:
             from django.conf import settings
-            full_path = f'{settings.MEDIA_ROOT}{image_path_or_url}'
+            if image_path_or_url.startswith('/'):
+                full_path = image_path_or_url
+            else:
+                full_path = f"{settings.MEDIA_ROOT.rstrip('/')}/{image_path_or_url.lstrip('/')}"
             with open(full_path, 'rb') as f:
                 image_data = f.read()
             content_type = 'image/jpeg'
@@ -97,19 +109,37 @@ def _upload_binary(upload_url, image_path_or_url):
         return False, f'خطا در آپلود تصویر: {e}'
 
 
-def _upload_image_for_channel(channel, content, access_token, owner_urn):
-    """Full 3-step image upload for LinkedIn."""
-    image_url = None
-    if content.image:
-        image_url = f'{settings.MEDIA_URL}{content.image}'
-    if not image_url:
-        return None, None
+def _register_upload_video(access_token, owner_urn):
+    """Register a video upload for LinkedIn (simplified; in production use the async video API)."""
+    url = 'https://api.linkedin.com/rest/videos?action=initializeUpload'
+    payload = {'initializeUploadRequest': {'owner': owner_urn}}
+    try:
+        resp = requests.post(url, headers=_headers(access_token), json=payload, timeout=20)
+        data = resp.json()
+        if not resp.ok:
+            logger.warning(f'LinkedIn register video upload failed: {data}')
+            return None, f'خطا در آماده‌سازی آپلود ویدیو: {data}'
+        value = data.get('value', {})
+        return {
+            'upload_url': value.get('uploadUrl'),
+            'asset_urn': value.get('video'),
+        }, None
+    except requests.exceptions.RequestException as e:
+        return None, f'خطا در اتصال به LinkedIn: {e}'
 
-    meta, err = _register_upload(access_token, owner_urn)
+
+def _upload_asset_for_channel(access_token, owner_urn, file_path, media_type):
+    """Upload an image or video asset and return the URN."""
+    if not file_path:
+        return None, None
+    if media_type == 'video':
+        meta, err = _register_upload_video(access_token, owner_urn)
+    else:
+        meta, err = _register_upload(access_token, owner_urn)
     if err:
         return None, err
 
-    ok, err = _upload_binary(meta['upload_url'], image_url)
+    ok, err = _upload_binary(meta['upload_url'], file_path)
     if not ok:
         return None, err
 
@@ -127,7 +157,7 @@ def _classify_error(err_text, status_code):
     return 'unknown', f'انتشار در LinkedIn با خطا مواجه شد: {err_text}'
 
 
-def publish(channel, content):
+def publish(channel, content, attachments=None):
     conn = _get_active_connection(channel)
     if not conn:
         return False, 'auth_error', 'اتصال LinkedIn فعال یافت نشد. لطفاً ابتدا متصل شوید.'
@@ -150,9 +180,32 @@ def publish(channel, content):
     if content.title and content.title not in ('untitled', ''):
         commentary = f'{content.title}\n\n{commentary}'
 
-    media_urn, err = _upload_image_for_channel(channel, content, access_token, author_urn)
-    if err:
-        return False, 'unknown', err
+    attachments = attachments or []
+    # LinkedIn does not support standalone voice/audio attachments
+    voice_present = any(a.get('media_type') == 'voice' for a in attachments)
+    usable = [a for a in attachments if a.get('media_type') in ('image', 'video')]
+
+    media_urn = None
+    if usable:
+        # Prefer the first video if present, otherwise first image
+        video = next((a for a in usable if a.get('media_type') == 'video'), None)
+        chosen = video or usable[0]
+        file_path = _resolve_media_path_or_url(chosen.get('file_path', ''))
+        if not file_path:
+            return False, 'unknown', 'مسیر فایل نامعتبر است'
+        media_urn, err = _upload_asset_for_channel(access_token, author_urn, file_path, chosen.get('media_type'))
+        if err:
+            return False, 'unknown', err
+    elif content.image:
+        # Fallback to legacy content image
+        file_path = _resolve_media_path_or_url(content.image.name)
+        if not file_path:
+            return False, 'unknown', 'مسیر تصویر نامعتبر است'
+        media_urn, err = _upload_asset_for_channel(access_token, author_urn, file_path, 'image')
+        if err:
+            return False, 'unknown', err
+    elif voice_present:
+        return False, 'unsupported_media', 'لینکدین امکان انتشار فایل صوتی مستقل را پشتیبانی نمی‌کند.'
 
     payload = {
         'author': author_urn,

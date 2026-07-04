@@ -33,9 +33,13 @@ export async function apiFetch(endpoint: string, options: FetchOptions = {}) {
   const token = getToken();
 
   const headers = new Headers(customHeaders);
-  headers.set("Content-Type", "application/json");
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
+  }
+  // Only set JSON content type when body is not FormData
+  const isFormData = data instanceof FormData;
+  if (!isFormData) {
+    headers.set("Content-Type", "application/json");
   }
 
   const config: RequestInit = {
@@ -44,7 +48,7 @@ export async function apiFetch(endpoint: string, options: FetchOptions = {}) {
   };
 
   if (data) {
-    config.body = JSON.stringify(data);
+    config.body = isFormData ? data : JSON.stringify(data);
   }
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, config);

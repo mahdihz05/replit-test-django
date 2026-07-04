@@ -10,4 +10,7 @@ urlpatterns = [
     path('<uuid:workspace_id>/publish/schedule/', views.publish_schedule),
     path('<uuid:workspace_id>/publish/history/', views.publish_history),
     path('<uuid:workspace_id>/publish/queue/', views.publish_queue),
+    path('<uuid:workspace_id>/publish/attachments/', views.upload_attachment),
+    path('<uuid:workspace_id>/publish/attachments/list/', views.list_attachments),
+    path('<uuid:workspace_id>/publish/attachments/from-content/', views.create_attachment_from_content_image),
 ]

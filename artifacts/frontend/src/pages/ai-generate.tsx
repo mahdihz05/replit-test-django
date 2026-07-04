@@ -6,17 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Wand2, Copy, Save, Loader2, CheckCheck } from "lucide-react";
+import { Wand2, Copy, Save, Loader2, CheckCheck, Image, RefreshCcw } from "lucide-react";
 
 type Tab = "text" | "rewrite" | "summary" | "scenario" | "title" | "hashtag" | "cta" | "idea";
 type Mode = "standard" | "bundle" | "multi_variant";
 
 interface GeneratedItem {
   id: string;
-  item_type: "full_text" | "short_text" | "hashtags" | "title" | "variant";
+  item_type: "full_text" | "short_text" | "hashtags" | "title" | "variant" | "image";
   order: number;
   content: string;
+  image?: string;
+  image_url?: string;
   saved_as_draft?: boolean;
 }
 
@@ -88,31 +92,40 @@ export default function AiGenerate() {
   const [count, setCount] = useState("5");
   const [niche, setNiche] = useState("");
   const [variantCount, setVariantCount] = useState("2");
+  const [generateImage, setGenerateImage] = useState(false);
+  const [includeImage, setIncludeImage] = useState(false);
+  const [imageRegenerating, setImageRegenerating] = useState<Record<string, boolean>>({});
+  const [imagePreviewOpen, setImagePreviewOpen] = useState<string | null>(null);
 
   const wid = selectedWorkspace?.id;
 
+  const IMAGE_COST = 12;
+
   const estimatedCost = () => {
-    if (mode === "bundle") return COSTS.ai_generate_bundle;
-    if (mode === "multi_variant") {
-      return variantCount === "2" ? COSTS.ai_generate_variant_2 : COSTS.ai_generate_variant_3;
+    let base = 0;
+    if (mode === "bundle") base = COSTS.ai_generate_bundle;
+    else if (mode === "multi_variant") {
+      base = variantCount === "2" ? COSTS.ai_generate_variant_2 : COSTS.ai_generate_variant_3;
+    } else {
+      switch (activeTab) {
+        case "text":
+        case "scenario":
+          base = COSTS.text_generation; break;
+        case "rewrite":
+        case "summary":
+          base = COSTS.content_rewrite; break;
+        case "title":
+        case "idea":
+          base = COSTS.title_suggestions; break;
+        case "hashtag":
+          base = COSTS.hashtag_suggestions; break;
+        case "cta":
+          base = COSTS.cta_generation; break;
+        default:
+          base = 0;
+      }
     }
-    switch (activeTab) {
-      case "text":
-      case "scenario":
-        return COSTS.text_generation;
-      case "rewrite":
-      case "summary":
-        return COSTS.content_rewrite;
-      case "title":
-      case "idea":
-        return COSTS.title_suggestions;
-      case "hashtag":
-        return COSTS.hashtag_suggestions;
-      case "cta":
-        return COSTS.cta_generation;
-      default:
-        return 0;
-    }
+    return base + (generateImage ? IMAGE_COST : 0);
   };
 
   const resetResults = () => {
@@ -128,55 +141,63 @@ export default function AiGenerate() {
   const handleStandardGenerate = async () => {
     if (!wid) return;
     let response: any;
+    const img = { generate_image: generateImage };
     switch (activeTab) {
       case "text":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/text/`, {
-          method: "POST", data: { goal, tone, platform, language: "fa", word_count: parseInt(wordCount) }
+          method: "POST", data: { goal, tone, platform, language: "fa", word_count: parseInt(wordCount), ...img }
         });
-        setResult(response?.data?.text ?? "");
         break;
       case "rewrite":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/rewrite/`, {
-          method: "POST", data: { text: inputText, tone }
+          method: "POST", data: { text: inputText, tone, ...img }
         });
-        setResult(response?.data?.text ?? "");
         break;
       case "summary":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/summary/`, {
-          method: "POST", data: { text: inputText, length: summaryLength }
+          method: "POST", data: { text: inputText, length: summaryLength, ...img }
         });
-        setResult(response?.data?.text ?? "");
         break;
       case "scenario":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/scenario/`, {
-          method: "POST", data: { topic, platform, goal: scenarioGoal }
+          method: "POST", data: { topic, platform, goal: scenarioGoal, ...img }
         });
-        setResult(response?.data?.text ?? "");
         break;
       case "title":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/titles/`, {
-          method: "POST", data: { topic, count: parseInt(count) }
+          method: "POST", data: { topic, count: parseInt(count), ...img }
         });
-        setResult(response?.data?.titles ?? []);
         break;
       case "hashtag":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/hashtags/`, {
-          method: "POST", data: { topic, platform, count: parseInt(count) }
+          method: "POST", data: { topic, platform, count: parseInt(count), ...img }
         });
-        setResult(response?.data?.hashtags ?? []);
         break;
       case "cta":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/cta/`, {
-          method: "POST", data: { goal, platform, count: parseInt(count) }
+          method: "POST", data: { goal, platform, count: parseInt(count), ...img }
         });
-        setResult(response?.data?.ctas ?? []);
         break;
       case "idea":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/idea/`, {
-          method: "POST", data: { niche, platform, count: parseInt(count) }
+          method: "POST", data: { niche, platform, count: parseInt(count), ...img }
         });
-        setResult(response?.data?.ideas ?? []);
         break;
+    }
+
+    // When generate_image is on, backend returns a batch with items (including the image item)
+    if (response?.data?.items) {
+      setItems(response.data.items);
+      // Also keep the first text item in result for legacy text display
+      const textItem = response.data.items.find((i: GeneratedItem) => ["full_text", "variant"].includes(i.item_type));
+      setResult(textItem ? textItem.content : "");
+    } else {
+      if (activeTab === "title") setResult(response?.data?.titles ?? []);
+      else if (activeTab === "hashtag") setResult(response?.data?.hashtags ?? []);
+      else if (activeTab === "cta") setResult(response?.data?.ctas ?? []);
+      else if (activeTab === "idea") setResult(response?.data?.ideas ?? []);
+      else setResult(response?.data?.text ?? "");
+      setItems([]);
     }
   };
 
@@ -184,7 +205,7 @@ export default function AiGenerate() {
     if (!wid) return;
     const response = await apiFetch(`/workspaces/${wid}/ai/generate/bundle/`, {
       method: "POST",
-      data: { topic: goal || topic, tone, platform }
+      data: { topic: goal || topic, tone, platform, generate_image: generateImage }
     });
     setItems(response?.data?.items ?? []);
   };
@@ -196,6 +217,7 @@ export default function AiGenerate() {
       variant_count: parseInt(variantCount),
       tone,
       platform,
+      generate_image: generateImage,
     };
     switch (activeTab) {
       case "text":
@@ -258,7 +280,7 @@ export default function AiGenerate() {
     try {
       await apiFetch(`/workspaces/${wid}/ai/generate/items/${item.id}/save/`, {
         method: "POST",
-        data: {}
+        data: { include_image: includeImage }
       });
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, saved_as_draft: true } : i));
       toast({ title: "ذخیره شد", description: "محتوا در پیش‌نویس‌ها ذخیره شد" });
@@ -266,6 +288,25 @@ export default function AiGenerate() {
       toast({ title: "خطا", description: error.message || "خطا در ذخیره", variant: "destructive" });
     } finally {
       setSaving(prev => ({ ...prev, [item.id]: false }));
+    }
+  };
+
+  const handleRegenerateImage = async (item: GeneratedItem) => {
+    if (!wid || item.item_type !== "variant") return;
+    setImageRegenerating(prev => ({ ...prev, [item.id]: true }));
+    try {
+      const res = await apiFetch(`/workspaces/${wid}/ai/generate/items/${item.id}/regenerate-image/`, {
+        method: "POST",
+      });
+      const imageItem = res?.data;
+      if (imageItem) {
+        setItems(prev => [...prev, imageItem]);
+        toast({ title: "تصویر جدید", description: "تصویر جدید برای این نسخه تولید شد" });
+      }
+    } catch (error: any) {
+      toast({ title: "خطا", description: error.message || "تولید تصویر با خطا مواجه شد", variant: "destructive" });
+    } finally {
+      setImageRegenerating(prev => ({ ...prev, [item.id]: false }));
     }
   };
 
@@ -585,8 +626,16 @@ export default function AiGenerate() {
           </CardHeader>
           <CardContent className="space-y-4">
             {renderForm()}
-            <div className="text-sm text-muted-foreground flex items-center justify-between">
-              <span>هزینه تخمینی: <strong className="text-foreground">{estimatedCost()} تومان</strong></span>
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center gap-2">
+                <Checkbox id="generateImage" checked={generateImage} onCheckedChange={v => setGenerateImage(!!v)} />
+                <Label htmlFor="generateImage" className="text-sm font-normal flex items-center gap-1.5">
+                  <Image className="w-3.5 h-3.5" /> تولید تصویر همزمان با متن (+{IMAGE_COST} تومان)
+                </Label>
+              </div>
+              <div className="text-sm text-muted-foreground flex items-center justify-between">
+                <span>هزینه تخمینی: <strong className="text-foreground">{estimatedCost()} تومان</strong></span>
+              </div>
             </div>
             <Button
               className="w-full gap-2 mt-2"
@@ -606,17 +655,25 @@ export default function AiGenerate() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">نتیجه</CardTitle>
-              {mode === "standard" && result && (
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleCopy(resultText, "standard")}>
-                    {copied["standard"] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    {copied["standard"] ? "کپی شد" : "کپی"}
-                  </Button>
-                  <Button size="sm" className="gap-1.5 h-8" onClick={handleSaveStandard}>
-                    <Save className="w-3.5 h-3.5" /> ذخیره
-                  </Button>
-                </div>
-              )}
+              <div className="flex items-center gap-3">
+                {items.some(i => i.item_type === "image") && (
+                  <div className="flex items-center gap-2">
+                    <Checkbox id="includeImage" checked={includeImage} onCheckedChange={v => setIncludeImage(!!v)} />
+                    <Label htmlFor="includeImage" className="text-xs font-normal">هنگام ذخیره، تصویر هم ضمیمه شود</Label>
+                  </div>
+                )}
+                {mode === "standard" && result && (
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleCopy(resultText, "standard")}>
+                      {copied["standard"] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copied["standard"] ? "کپی شد" : "کپی"}
+                    </Button>
+                    <Button size="sm" className="gap-1.5 h-8" onClick={handleSaveStandard}>
+                      <Save className="w-3.5 h-3.5" /> ذخیره
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
@@ -634,22 +691,34 @@ export default function AiGenerate() {
               </div>
             )}
             {mode === "standard" && result && (
-              Array.isArray(result) ? (
-                <ul className="space-y-2">
-                  {result.map((item, i) => (
-                    <li key={i} className="p-3 bg-muted/50 rounded-lg text-sm flex items-start gap-2">
-                      <span className="text-primary font-bold shrink-0">{i + 1}.</span>
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <Textarea
-                  value={result as string}
-                  onChange={e => setResult(e.target.value)}
-                  className="min-h-[280px] text-sm leading-relaxed resize-none"
-                />
-              )
+              <div className="space-y-4">
+                {Array.isArray(result) ? (
+                  <ul className="space-y-2">
+                    {result.map((item, i) => (
+                      <li key={i} className="p-3 bg-muted/50 rounded-lg text-sm flex items-start gap-2">
+                        <span className="text-primary font-bold shrink-0">{i + 1}.</span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <Textarea
+                    value={result as string}
+                    onChange={e => setResult(e.target.value)}
+                    className="min-h-[280px] text-sm leading-relaxed resize-none"
+                  />
+                )}
+                {items.filter(i => i.item_type === "image").map(img => (
+                  <div key={img.id} className="relative rounded-lg overflow-hidden border group">
+                    <img src={img.image_url || img.image} alt="تصویر تولیدشده" className="w-full h-auto max-h-80 object-contain" />
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button size="sm" variant="outline" className="bg-white/90" onClick={() => handleCopy(img.image_url || img.image || "", img.id)}>
+                        {copied[img.id] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
             {!loading && (mode === "bundle" || mode === "multi_variant") && items.length === 0 && (
               <div className="flex items-center justify-center h-48 text-muted-foreground border-2 border-dashed rounded-lg">
@@ -657,32 +726,59 @@ export default function AiGenerate() {
               </div>
             )}
             {!loading && (mode === "bundle" || mode === "multi_variant") && items.length > 0 && (
-              <div className={`grid gap-4 ${mode === "multi_variant" ? "grid-cols-1" : "grid-cols-1"}`}>
+              <div className="grid gap-4 grid-cols-1">
                 {items.map(item => (
                   <div key={item.id} className="p-4 bg-muted/50 rounded-lg border">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-1 rounded">
-                        {item.item_type === "variant" ? `نسخه ${item.order}` : ITEM_LABELS[item.item_type] || item.item_type}
+                        {item.item_type === "variant" ? `نسخه ${item.order}` : item.item_type === "image" ? "تصویر" : ITEM_LABELS[item.item_type] || item.item_type}
                       </span>
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleCopy(item.content, item.id)}>
-                          {copied[item.id] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          {copied[item.id] ? "کپی شد" : "کپی"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="gap-1.5 h-8"
-                          onClick={() => handleSaveItem(item)}
-                          disabled={item.saved_as_draft || saving[item.id]}
-                        >
-                          {saving[item.id] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                          {item.saved_as_draft ? "ذخیره شده" : "ذخیره"}
-                        </Button>
+                        {item.item_type === "image" ? (
+                          <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleCopy(item.image_url || item.image || "", item.id)}>
+                            {copied[item.id] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copied[item.id] ? "کپی شد" : "کپی"}
+                          </Button>
+                        ) : (
+                          <>
+                            <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleCopy(item.content, item.id)}>
+                              {copied[item.id] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                              {copied[item.id] ? "کپی شد" : "کپی"}
+                            </Button>
+                            {mode === "multi_variant" && item.item_type === "variant" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-1.5 h-8"
+                                onClick={() => handleRegenerateImage(item)}
+                                disabled={imageRegenerating[item.id]}
+                              >
+                                {imageRegenerating[item.id] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCcw className="w-3.5 h-3.5" />}
+                                تصویر برای این نسخه
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              className="gap-1.5 h-8"
+                              onClick={() => handleSaveItem(item)}
+                              disabled={item.saved_as_draft || saving[item.id]}
+                            >
+                              {saving[item.id] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                              {item.saved_as_draft ? "ذخیره شده" : "ذخیره"}
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                      {item.item_type === "hashtags" ? item.content.split("\n").map((h, i) => <div key={i} className="inline-block ml-2">{h}</div>) : item.content}
-                    </div>
+                    {item.item_type === "image" ? (
+                      <div className="relative rounded-lg overflow-hidden border group">
+                        <img src={item.image_url || item.image} alt="تصویر تولیدشده" className="w-full h-auto max-h-80 object-contain" />
+                      </div>
+                    ) : (
+                      <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                        {item.item_type === "hashtags" ? item.content.split("\n").map((h, i) => <div key={i} className="inline-block ml-2">{h}</div>) : item.content}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
