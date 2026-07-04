@@ -4,8 +4,7 @@ import { getToken, removeToken, setToken, apiFetch, getSelectedWorkspace, setSel
 interface User {
   id: string;
   phone_number: string;
-  first_name?: string;
-  last_name?: string;
+  full_name?: string;
 }
 
 interface Workspace {
@@ -25,6 +24,8 @@ interface AuthContextType {
   logout: () => void;
   selectWorkspace: (id: string) => void;
   refreshWorkspaces: () => Promise<void>;
+  createWorkspace: (name: string) => Promise<Workspace>;
+  updateUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -40,12 +41,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await apiFetch("/workspaces/");
       const list = Array.isArray(response) ? response : (response?.data ?? []);
       setWorkspaces(list);
-      if (list.length > 0 && !selectedWorkspaceId) {
+      if (list.length === 0) {
+        setSelectedWorkspaceId(null);
+        setSelectedWorkspace(null);
+      } else if (!selectedWorkspaceId || !list.find((w: Workspace) => w.id === selectedWorkspaceId)) {
         selectWorkspace(list[0].id);
       }
     } catch (error) {
       console.error("Failed to load workspaces", error);
     }
+  };
+
+  const createWorkspace = async (name: string): Promise<Workspace> => {
+    const response = await apiFetch("/workspaces/", {
+      method: "POST",
+      data: { name },
+    });
+    const workspace = response?.data ?? response;
+    setWorkspaces(prev => [...prev, workspace]);
+    selectWorkspace(workspace.id);
+    return workspace;
   };
 
   useEffect(() => {
@@ -85,10 +100,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSelectedWorkspace(id);
   };
 
-  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId) || workspaces[0] || null;
+  const selectedWorkspace = workspaces.find(w => w.id === selectedWorkspaceId) || null;
+
+  const updateUser = (updatedUser: User) => {
+    setUser(updatedUser);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, workspaces, selectedWorkspace, isLoading, login, logout, selectWorkspace, refreshWorkspaces }}>
+    <AuthContext.Provider value={{ user, workspaces, selectedWorkspace, isLoading, login, logout, selectWorkspace, refreshWorkspaces, createWorkspace, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

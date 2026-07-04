@@ -1,11 +1,11 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { 
   LayoutDashboard, FileText, Bot, Share2, 
   SendHorizontal, Wallet, BarChart3, Users, 
   Settings, LogOut, ChevronDown, Menu, Wand2, ImageIcon,
-  Clock, History
+  Clock, History, Plus, Building2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +17,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
 
 interface NavItem {
   href: string;
@@ -95,8 +99,11 @@ function SidebarContent({ currentLocation, onNavigate }: { currentLocation: stri
 }
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, workspaces, selectedWorkspace, selectWorkspace, logout, isLoading } = useAuth();
+  const { user, workspaces, selectedWorkspace, selectWorkspace, logout, isLoading, createWorkspace } = useAuth();
   const [location, setLocation] = useLocation();
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -104,12 +111,67 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isLoading, user, setLocation]);
 
+  const handleCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWorkspaceName.trim()) return;
+    setCreating(true);
+    try {
+      await createWorkspace(newWorkspaceName.trim());
+      toast({ title: "موفق", description: "فضای کاری جدید ساخته شد." });
+      setNewWorkspaceName("");
+    } catch (error) {
+      toast({
+        title: "خطا",
+        description: error instanceof Error ? error.message : "ساخت فضای کاری با مشکل مواجه شد.",
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
   if (isLoading) {
     return <div className="min-h-screen flex items-center justify-center">در حال بارگذاری...</div>;
   }
 
   if (!user) {
     return null;
+  }
+
+  if (workspaces.length === 0) {
+    return (
+      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4" dir="rtl">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+              <Building2 className="w-6 h-6 text-primary" />
+            </div>
+            <CardTitle>خوش آمدید</CardTitle>
+            <CardDescription>
+              برای استفاده از محتوا‌یار، ابتدا یک فضای کاری بسازید.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleCreateWorkspace} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="workspace-name">نام فضای کاری</Label>
+                <Input
+                  id="workspace-name"
+                  placeholder="مثال: تیم محتوا"
+                  value={newWorkspaceName}
+                  onChange={(e) => setNewWorkspaceName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={creating || !newWorkspaceName.trim()}>
+                <Plus className="w-4 h-4 ml-2" />
+                {creating ? "در حال ساخت..." : "ساخت فضای کاری"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -165,7 +227,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
           <div className="flex items-center gap-4">
             <span className="text-sm font-medium hidden sm:block">
-              {user.first_name ? `${user.first_name} ${user.last_name || ""}` : user.phone_number}
+              {user.full_name || user.phone_number}
             </span>
             <Button variant="ghost" size="icon" onClick={logout} title="خروج">
               <LogOut className="w-5 h-5 text-muted-foreground hover:text-destructive" />

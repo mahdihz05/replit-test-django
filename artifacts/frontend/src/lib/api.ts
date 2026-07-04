@@ -16,8 +16,12 @@ export function getSelectedWorkspace() {
   return localStorage.getItem("selected_workspace_id");
 }
 
-export function setSelectedWorkspace(id: string) {
-  localStorage.setItem("selected_workspace_id", id);
+export function setSelectedWorkspace(id: string | null) {
+  if (id) {
+    localStorage.setItem("selected_workspace_id", id);
+  } else {
+    localStorage.removeItem("selected_workspace_id");
+  }
 }
 
 interface FetchOptions extends RequestInit {
