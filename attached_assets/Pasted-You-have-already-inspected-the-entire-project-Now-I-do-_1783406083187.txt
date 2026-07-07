@@ -1,0 +1,358 @@
+You have already inspected the entire project.
+
+Now I do NOT want explanations.
+
+I want the FINAL production artifacts and verification information required to deploy this exact project on a clean Ubuntu 24.04 VPS.
+
+Please inspect the code again before answering.
+
+========================
+1. Verify previous assumptions
+========================
+
+Confirm whether ALL of these statements are 100% correct.
+
+For each one answer:
+
+✅ Correct
+
+❌ Incorrect
+
+and explain if anything should change.
+
+- Django backend is the only backend.
+- artifacts/api-server is unused.
+- React frontend builds to artifacts/frontend/dist/public.
+- Node.js is only required for building the frontend.
+- PostgreSQL is the only database.
+- Gunicorn should be used (not Daphne/Uvicorn).
+- APScheduler runs inside Django.
+- Gunicorn must use one worker.
+- --preload is required.
+- Redis is not used.
+- Celery is not used.
+- No background worker is required.
+- Nginx serves frontend/static/media.
+
+========================
+2. Environment Variables
+========================
+
+Search the ENTIRE repository.
+
+List EVERY environment variable actually referenced anywhere in the code.
+
+For each variable provide:
+
+- Required?
+- Default value
+- File where it is used
+- Purpose
+
+Do NOT invent variables.
+
+========================
+3. Python Dependencies
+========================
+
+Inspect both:
+
+backend/requirements.txt
+
+and
+
+pyproject.toml
+
+Tell me:
+
+Which dependency file should be used in production?
+
+Why?
+
+Are they synchronized?
+
+Can requirements.txt be deleted?
+
+Should I run:
+
+pip install .
+
+or
+
+pip install -r backend/requirements.txt
+
+========================
+4. Production Folder Layout
+========================
+
+Show the recommended directory layout on Ubuntu.
+
+Example:
+
+/var/www/project/
+
+backend/
+
+frontend/
+
+venv/
+
+media/
+
+staticfiles/
+
+logs/
+
+etc.
+
+Include ownership recommendations.
+
+========================
+5. Systemd
+========================
+
+Generate the COMPLETE production systemd service.
+
+Do NOT omit anything.
+
+Include:
+
+User
+
+Group
+
+WorkingDirectory
+
+EnvironmentFile
+
+ExecStart
+
+Restart
+
+RestartSec
+
+WantedBy
+
+Logging
+
+========================
+6. Nginx
+========================
+
+Generate the COMPLETE nginx configuration.
+
+Include:
+
+HTTP
+
+HTTPS
+
+Redirect HTTP→HTTPS
+
+SSL
+
+React routing
+
+API proxy
+
+Admin proxy
+
+Static
+
+Media
+
+Security headers
+
+gzip
+
+Cache headers
+
+Large uploads
+
+========================
+7. APScheduler
+========================
+
+Show the EXACT startup path.
+
+Which file starts it?
+
+Show the code path.
+
+Explain exactly why only one scheduler instance exists.
+
+Show how the lock file works.
+
+Confirm whether one Gunicorn worker is mandatory.
+
+========================
+8. Security
+========================
+
+Inspect the Django settings.
+
+Generate the recommended production values for:
+
+DEBUG
+
+ALLOWED_HOSTS
+
+CSRF_TRUSTED_ORIGINS
+
+CORS_ALLOWED_ORIGINS
+
+SESSION_COOKIE_SECURE
+
+CSRF_COOKIE_SECURE
+
+SECURE_SSL_REDIRECT
+
+SECURE_PROXY_SSL_HEADER
+
+Any other security-related settings.
+
+========================
+9. Deploy Commands
+========================
+
+Generate the COMPLETE deployment commands in order.
+
+Start from an empty Ubuntu 24.04 VPS.
+
+Every command must be copy-paste ready.
+
+Include:
+
+apt install
+
+Python
+
+Node
+
+pnpm
+
+PostgreSQL
+
+git clone
+
+virtualenv
+
+dependency installation
+
+database creation
+
+migrations
+
+collectstatic
+
+frontend build
+
+permissions
+
+systemd
+
+nginx
+
+certbot
+
+enable services
+
+first startup
+
+verification
+
+========================
+10. Verification Checklist
+========================
+
+Generate a final deployment checklist.
+
+Each step must have a command to verify success.
+
+Example:
+
+□ PostgreSQL running
+
+Command:
+
+...
+
+Expected output:
+
+...
+
+Continue until the website is fully operational.
+
+========================
+11. Hidden Problems
+========================
+
+Inspect the entire project one last time.
+
+List every hidden production issue that could cause deployment failure.
+
+Examples:
+
+missing permissions
+
+incorrect paths
+
+scheduler duplication
+
+frontend build assumptions
+
+environment variables
+
+database initialization
+
+file uploads
+
+hardcoded values
+
+Replit-specific code
+
+race conditions
+
+or anything else.
+
+Do not give generic advice.
+
+Only report issues that actually exist in THIS project.
+
+========================
+12. Final Confidence Report
+========================
+
+Finally provide a table with:
+
+- Item
+- Confidence (0-100%)
+- Reason
+
+for every major deployment component:
+
+Backend
+
+Frontend
+
+Database
+
+Scheduler
+
+Static
+
+Media
+
+Nginx
+
+Gunicorn
+
+Systemd
+
+Environment Variables
+
+Security
+
+Deployment Procedure
+
+If any confidence is below 95%, explain exactly what information is still missing.
