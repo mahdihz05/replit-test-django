@@ -1,0 +1,345 @@
+I am permanently moving this project from Replit to my own Ubuntu VPS.
+
+I do NOT want a generic deployment guide.
+
+I want you to inspect THIS project and explain exactly how THIS project works in production.
+
+Assume the target server is a clean Ubuntu 24.04 VPS.
+
+Please answer every section below in detail.
+
+========================
+1. Runtime Architecture
+========================
+
+Explain the complete runtime architecture.
+
+Draw it as a tree.
+
+Show:
+
+Browser
+↓
+
+Nginx
+
+↓
+
+Frontend
+
+↓
+
+Django
+
+↓
+
+PostgreSQL
+
+and every other component that actually exists.
+
+Also explain which requests go where.
+
+========================
+2. Production Services
+========================
+
+List every process that must be running.
+
+For each process provide:
+
+- Name
+- Required? (Yes/No)
+- Start command
+- Port
+- Python or Node
+- Runs continuously?
+- systemd service name recommendation
+
+Also list every process that is NOT needed in production.
+
+========================
+3. Backend
+========================
+
+Explain exactly how the Django backend starts.
+
+Include:
+
+- WSGI or ASGI
+- Gunicorn or Daphne
+- Number of workers recommended
+- Timeout
+- Working directory
+- Virtual environment
+
+Provide the exact production command.
+
+========================
+4. Scheduler
+========================
+
+Inspect APScheduler.
+
+Explain:
+
+Which file starts it?
+
+When does it start?
+
+What happens if Gunicorn has multiple workers?
+
+Can duplicate jobs occur?
+
+What is the safest production configuration?
+
+========================
+5. Database
+========================
+
+Explain:
+
+Database engine
+
+Required extensions
+
+Migration command
+
+Seed command (if any)
+
+Backup recommendations
+
+========================
+6. Environment Variables
+========================
+
+Generate a COMPLETE .env.example.
+
+Include EVERY environment variable.
+
+For each variable explain:
+
+Purpose
+
+Required or optional
+
+Default value
+
+Module that uses it
+
+========================
+7. Static Files
+========================
+
+Explain exactly how static files work.
+
+Show:
+
+STATIC_ROOT
+
+STATIC_URL
+
+collectstatic destination
+
+Which folder nginx serves.
+
+========================
+8. Media Files
+========================
+
+Explain exactly how uploaded files work.
+
+Show:
+
+MEDIA_ROOT
+
+MEDIA_URL
+
+Upload directory
+
+Persistent directories on VPS
+
+nginx configuration requirements
+
+========================
+9. Frontend
+========================
+
+Explain:
+
+How frontend is built
+
+Exact build command
+
+Exact output folder
+
+Whether Node is required after build
+
+Which folder nginx serves
+
+========================
+10. Replit Dependencies
+========================
+
+List EVERYTHING that only exists because of Replit.
+
+For every item explain:
+
+Why it exists
+
+Whether it can be removed
+
+How it should be replaced on Ubuntu
+
+Examples:
+
+.replit
+
+.local
+
+.agents
+
+artifacts/api-server
+
+etc.
+
+========================
+11. Folder Structure
+========================
+
+Show which folders are required on production.
+
+Show which folders can be deleted.
+
+========================
+12. Reverse Proxy
+========================
+
+Explain exactly how nginx should be configured.
+
+Show every location block needed.
+
+Include:
+
+/
+
+/api/
+
+/static/
+
+/media/
+
+========================
+13. Security
+========================
+
+Explain the required production settings.
+
+Include:
+
+DEBUG
+
+ALLOWED_HOSTS
+
+CSRF_TRUSTED_ORIGINS
+
+CORS
+
+SECRET_KEY
+
+========================
+14. Startup Order
+========================
+
+List the exact deployment order.
+
+Example:
+
+Install packages
+
+↓
+
+Clone repository
+
+↓
+
+Create virtualenv
+
+↓
+
+Install Python dependencies
+
+↓
+
+Install Node dependencies
+
+↓
+
+Configure .env
+
+↓
+
+Create PostgreSQL database
+
+↓
+
+Run migrate
+
+↓
+
+Run collectstatic
+
+↓
+
+Build frontend
+
+↓
+
+Configure Gunicorn
+
+↓
+
+Configure systemd
+
+↓
+
+Configure nginx
+
+↓
+
+Enable SSL
+
+↓
+
+Start services
+
+========================
+15. Deployment Pitfalls
+========================
+
+Inspect the project carefully and list every hidden dependency or common deployment issue.
+
+For example:
+
+missing environment variables
+
+scheduler problems
+
+permissions
+
+media folder
+
+static folder
+
+wrong working directory
+
+multiple scheduler instances
+
+Node build problems
+
+etc.
+
+Do NOT give generic advice.
+
+Only describe problems that actually apply to THIS project.
+
+If you are unsure about something, inspect the project first before answering.
