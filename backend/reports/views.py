@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+import jdatetime
 from django.db.models import Count, Sum
 from django.utils import timezone
 from rest_framework import status
@@ -15,6 +16,31 @@ def get_member(user, workspace_id):
         return WorkspaceMember.objects.get(workspace_id=workspace_id, user=user)
     except WorkspaceMember.DoesNotExist:
         return None
+
+
+def _last_6_persian_months():
+    """Return the last 6 Persian months with labels and Gregorian date boundaries."""
+    today = jdatetime.date.today()
+    months = []
+    for i in range(5, -1, -1):
+        year = today.year
+        month = today.month - i
+        while month <= 0:
+            year -= 1
+            month += 12
+
+        start = jdatetime.date(year, month, 1)
+        if month == 12:
+            end = jdatetime.date(year + 1, 1, 1)
+        else:
+            end = jdatetime.date(year, month + 1, 1)
+
+        months.append({
+            'label': start.strftime('%B %Y'),
+            'start_gregorian': start.togregorian(),
+            'end_gregorian': end.togregorian(),
+        })
+    return months
 
 
 @api_view(['GET'])
@@ -104,10 +130,20 @@ def content_report(request, workspace_id):
     by_status = contents.values('status').annotate(count=Count('id'))
     total = contents.count()
 
+    # Last 6 Persian months of content creation (true month boundaries)
+    by_month = []
+    for m in _last_6_persian_months():
+        count = contents.filter(
+            created_at__date__gte=m['start_gregorian'],
+            created_at__date__lt=m['end_gregorian']
+        ).count()
+        by_month.append({'label': m['label'], 'count': count})
+
     return Response({'success': True, 'data': {
         'total': total,
         'by_status': {item['status']: item['count'] for item in by_status},
-        'recent': contents.order_by('-created_at').values('id', 'title', 'status', 'created_at')[:5]
+        'by_month': by_month,
+        'recent': list(contents.order_by('-created_at').values('id', 'title', 'status', 'created_at')[:5])
     }})
 
 
@@ -120,14 +156,36 @@ def publishing_report(request, workspace_id):
                         status=status.HTTP_403_FORBIDDEN)
 
     from publishing.models import PublishJob
+    from channels_app.models import PublishChannel
+
     jobs = PublishJob.objects.filter(content__workspace_id=workspace_id)
     by_status = jobs.values('status').annotate(count=Count('id'))
     by_channel = jobs.values('channel__name', 'channel__platform').annotate(count=Count('id'))
+
+    # 30-day publish trend by completion date (successful publishes)
+    today = timezone.now().date()
+    by_day = []
+    for i in range(29, -1, -1):
+        d = today - timedelta(days=i)
+        by_day.append({
+            'date': d.strftime('%m/%d'),
+            'count': jobs.filter(completed_at__date=d, status='success').count()
+        })
+
+    # Publishes by platform (via channel)
+    by_platform = {}
+    for item in jobs.values('channel__platform').annotate(count=Count('id')):
+        by_platform[item['channel__platform']] = item['count']
+
+    total_channels = PublishChannel.objects.filter(workspace_id=workspace_id, is_active=True).count()
 
     return Response({'success': True, 'data': {
         'total': jobs.count(),
         'by_status': {item['status']: item['count'] for item in by_status},
         'by_channel': list(by_channel),
+        'by_day': by_day,
+        'by_platform': by_platform,
+        'total_channels': total_channels,
     }})
 
 
@@ -148,10 +206,23 @@ def ai_usage_report(request, workspace_id):
     except Wallet.DoesNotExist:
         total_spent = 0
         tx_count = 0
+        ai_deductions = WalletTransaction.objects.none()
+
+    # 30-day AI spending trend
+    today = timezone.now().date()
+    by_day = []
+    for i in range(29, -1, -1):
+        d = today - timedelta(days=i)
+        by_day.append({
+            'date': d.strftime('%m/%d'),
+            'amount': float(ai_deductions.filter(created_at__date=d).aggregate(
+                total=Sum('amount'))['total'] or 0),
+        })
 
     return Response({'success': True, 'data': {
         'total_spent': float(total_spent),
         'transaction_count': tx_count,
+        'by_day': by_day,
     }})
 
 
@@ -167,8 +238,19 @@ def errors_report(request, workspace_id):
     logs = PublishLog.objects.filter(job__content__workspace_id=workspace_id, success=False)
     by_type = logs.values('error_type').annotate(count=Count('id'))
 
+    # 30-day error trend
+    today = timezone.now().date()
+    by_day = []
+    for i in range(29, -1, -1):
+        d = today - timedelta(days=i)
+        by_day.append({
+            'date': d.strftime('%m/%d'),
+            'count': logs.filter(attempted_at__date=d).count()
+        })
+
     return Response({'success': True, 'data': {
         'total_errors': logs.count(),
         'by_type': {item['error_type']: item['count'] for item in by_type},
+        'by_day': by_day,
         'recent': list(logs.values('error_type', 'user_message', 'attempted_at')[:10])
     }})
