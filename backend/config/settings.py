@@ -10,7 +10,7 @@ if not _secret:
     raise RuntimeError("SECRET_KEY or SESSION_SECRET environment variable must be set")
 SECRET_KEY = _secret
 
-DEBUG = os.environ.get('DEBUG', 'False') == 'True'
+DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 _allowed = os.environ.get('ALLOWED_HOSTS', '')
 if _allowed:
