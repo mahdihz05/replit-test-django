@@ -2,6 +2,11 @@ import os
 import requests
 from django.conf import settings
 
+from . import prompts
+
+
+default_chat_model = 'gpt-4.1-mini'
+
 
 def get_openai_client():
     try:
@@ -12,126 +17,82 @@ def get_openai_client():
         return None
 
 
-def generate_text(goal, platform='', tone='حرفه‌ای', keywords='', language='fa', word_count=300):
+def _call_chat(system_prompt, user_prompt, model=None, response_format=None, max_retries=1):
+    """Thin wrapper around chat.completions.create with retry."""
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
         return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
 
-    system_prompt = 'You are an expert Persian content creator for social media.'
-    user_prompt = f"""محتوا بنویس با این مشخصات:
-هدف: {goal}
-پلتفرم: {platform}
-لحن: {tone}
-کلمات کلیدی: {keywords}
-زبان: {'فارسی' if language == 'fa' else language}
-تعداد کلمات تقریبی: {word_count}
+    model = model or default_chat_model
+    messages = [
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': user_prompt}
+    ]
 
-فقط متن محتوا را بنویس بدون توضیحات اضافه."""
+    last_error = None
+    total_tokens = 0
+    for attempt in range(max_retries):
+        try:
+            kwargs = {'model': model, 'messages': messages}
+            if response_format:
+                kwargs['response_format'] = response_format
+            response = client.chat.completions.create(**kwargs)
+            text = response.choices[0].message.content
+            total_tokens += response.usage.total_tokens or 0
+            return text, None, total_tokens
+        except Exception as e:
+            last_error = str(e)
 
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': user_prompt}
-            ]
-        )
-        text = response.choices[0].message.content
-        tokens = response.usage.total_tokens
-        return text, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+    return None, last_error or 'تولید محتوا با خطا مواجه شد. لطفاً دوباره تلاش کنید.', total_tokens
 
 
-def rewrite_text(text, tone='حرفه‌ای'):
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
-
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': 'You are an expert Persian content rewriter.'},
-                {'role': 'user', 'content': f'این متن را بازنویسی کن با لحن {tone}:\n\n{text}'}
-            ]
-        )
-        result = response.choices[0].message.content
-        tokens = response.usage.total_tokens
-        return result, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+def generate_text(goal, platform='', tone='حرفه‌ای', keywords='', language='fa', word_count=300, is_caption=False):
+    system_prompt, user_prompt = prompts.build_text_prompt(
+        goal=goal, platform=platform, tone=tone, keywords=keywords, language=language, word_count=word_count, is_caption=is_caption
+    )
+    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    return text, error, tokens
 
 
-def suggest_titles(topic, count=5):
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
-
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': 'You are an expert Persian content creator.'},
-                {'role': 'user', 'content': f'{count} عنوان جذاب برای این موضوع پیشنهاد بده:\n{topic}\n\nفقط لیست عناوین را بنویس، هر عنوان در یک خط.'}
-            ]
-        )
-        text = response.choices[0].message.content
-        titles = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
-        tokens = response.usage.total_tokens
-        return titles, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+def rewrite_text(text, tone='حرفه‌ای', platform=''):
+    system_prompt, user_prompt = prompts.build_rewrite_prompt(text, tone, platform)
+    result, error, tokens = _call_chat(system_prompt, user_prompt)
+    return result, error, tokens
 
 
-def suggest_hashtags(topic, count=10):
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
+def suggest_titles(topic, count=5, platform=''):
+    system_prompt, user_prompt = prompts.build_titles_prompt(topic, count, platform)
+    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    if error:
+        return None, error, tokens
+    titles = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
+    return titles, None, tokens
 
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': 'You are an expert Persian social media specialist.'},
-                {'role': 'user', 'content': f'{count} هشتگ مناسب برای این موضوع پیشنهاد بده:\n{topic}\n\nفقط هشتگ‌ها را بنویس، هر کدام در یک خط.'}
-            ]
-        )
-        text = response.choices[0].message.content
-        hashtags = [t.strip() for t in text.strip().split('\n') if t.strip()][:count]
-        tokens = response.usage.total_tokens
-        return hashtags, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+
+def suggest_hashtags(topic, count=10, platform=''):
+    system_prompt, user_prompt = prompts.build_hashtags_prompt(topic, count, platform)
+    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    if error:
+        return None, error, tokens
+    hashtags = [t.strip() for t in text.strip().split('\n') if t.strip()][:count]
+    return hashtags, None, tokens
 
 
 def generate_cta(goal, platform='', count=3):
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
-
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': 'You are an expert Persian copywriter.'},
-                {'role': 'user', 'content': f'{count} call-to-action قوی برای این هدف بنویس:\nهدف: {goal}\nپلتفرم: {platform}\n\nفقط لیست CTAها را بنویس.'}
-            ]
-        )
-        text = response.choices[0].message.content
-        ctas = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
-        tokens = response.usage.total_tokens
-        return ctas, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+    system_prompt, user_prompt = prompts.build_cta_prompt(goal, platform, count)
+    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    if error:
+        return None, error, tokens
+    ctas = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
+    return ctas, None, tokens
 
 
-def generate_image(description, style=''):
+def generate_image(description, style='', platform=''):
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
         return None, 'کلید API هوش مصنوعی تنظیم نشده است'
 
-    prompt = description
+    prompt = prompts.build_image_prompt_enhancement(description, platform)
     if style:
         prompt += f', style: {style}'
 
@@ -163,110 +124,70 @@ def generate_image(description, style=''):
         return None, str(e)
 
 
-def generate_image_prompt(source_text, max_words=25):
-    """Ask GPT-4o to write a short English DALL-E prompt from the given Persian text."""
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
-
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {
-                    'role': 'system',
-                    'content': (
-                        'You are an expert image prompt engineer. Based on the text provided, '
-                        'write a concise, vivid English image generation prompt suitable for DALL-E 3. '
-                        f'Maximum {max_words} words. Return only the prompt, no extra explanation.'
-                    )
-                },
-                {'role': 'user', 'content': source_text[:2000]},
-            ]
-        )
-        prompt = response.choices[0].message.content.strip()
-        tokens = response.usage.total_tokens
-        return prompt, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+def generate_image_prompt(source_text, max_words=25, platform=''):
+    """Ask the mini model to write a short English DALL-E prompt from the given Persian text."""
+    system_prompt = (
+        'You are an expert image prompt engineer. Based on the text provided, '
+        'write a concise, vivid English image generation prompt suitable for DALL-E 3. '
+        'Return only the prompt, no extra explanation.'
+    )
+    user_prompt = prompts.build_image_prompt_from_text(source_text, platform, max_words)
+    prompt, error, tokens = _call_chat(system_prompt, user_prompt)
+    if prompt:
+        prompt = prompt.strip()
+    return prompt, error, tokens
 
 
-def generate_image_from_text(source_text, style=''):
+def generate_image_from_text(source_text, style='', platform=''):
     """Two-step image generation: create a DALL-E prompt from text, then generate image."""
-    prompt, error, _ = generate_image_prompt(source_text)
+    prompt, error, _ = generate_image_prompt(source_text, platform=platform)
     if error:
         return None, error
-    return generate_image(prompt, style=style)
+    return generate_image(prompt, style=style, platform=platform)
 
 
-def generate_summary(text, length='brief'):
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
-    length_fa = 'کوتاه و فشرده' if length == 'brief' else 'جامع و کامل'
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': 'You are an expert Persian content summarizer.'},
-                {'role': 'user', 'content': f'این متن را به صورت {length_fa} خلاصه کن:\n\n{text}'}
-            ]
-        )
-        result = response.choices[0].message.content
-        tokens = response.usage.total_tokens
-        return result, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+def generate_summary(text, length='brief', platform=''):
+    system_prompt, user_prompt = prompts.build_summary_prompt(text, length)
+    if platform:
+        # Summaries are usually platform-agnostic, but if the caller provides a platform we can
+        # add a light hint that the summary may be used as caption/copy for that platform.
+        user_prompt = f"{prompts.get_platform_rules(platform)}\n\n{user_prompt}"
+    result, error, tokens = _call_chat(system_prompt, user_prompt)
+    return result, error, tokens
 
 
 def generate_scenario(topic, platform='', goal=''):
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': 'You are an expert Persian content strategist and scriptwriter.'},
-                {'role': 'user', 'content': f'یک سناریوی محتوایی کامل بنویس:\nموضوع: {topic}\nپلتفرم: {platform}\nهدف: {goal}\n\nشامل: هوک ابتدایی، بدنه اصلی، و call-to-action باشد.'}
-            ]
-        )
-        result = response.choices[0].message.content
-        tokens = response.usage.total_tokens
-        return result, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+    system_prompt, user_prompt = prompts.build_scenario_prompt(topic, platform, goal)
+    result, error, tokens = _call_chat(system_prompt, user_prompt)
+    return result, error, tokens
 
 
 def generate_idea(niche, platform='', count=5):
-    client = get_openai_client()
-    if not client or not settings.OPENAI_API_KEY:
-        return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
-    try:
-        response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {'role': 'system', 'content': 'You are an expert Persian content idea generator.'},
-                {'role': 'user', 'content': f'{count} ایده خلاقانه برای تولید محتوا پیشنهاد بده:\nحوزه: {niche}\nپلتفرم: {platform}\n\nهر ایده را با یک جمله توضیح بده.'}
-            ]
-        )
-        text = response.choices[0].message.content
-        ideas = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
-        tokens = response.usage.total_tokens
-        return ideas, None, tokens
-    except Exception as e:
-        return None, str(e), 0
+    system_prompt, user_prompt = prompts.build_idea_prompt(niche, platform, count)
+    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    if error:
+        return None, error, tokens
+    ideas = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
+    return ideas, None, tokens
 
 
-def chat_completion(messages):
+def chat_completion(messages, platform=''):
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
         return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
 
+    # Only inject a platform-aware system prompt if the caller did not already provide one.
+    # This preserves any custom system behavior callers rely on.
+    has_system = any(m.get('role') == 'system' for m in messages)
+    if has_system:
+        full_messages = messages
+    else:
+        full_messages = [{'role': 'system', 'content': prompts.build_chat_system_prompt()}] + messages
+
     try:
         response = client.chat.completions.create(
-            model='gpt-4o',
-            messages=messages
+            model=default_chat_model,
+            messages=full_messages
         )
         text = response.choices[0].message.content
         tokens = response.usage.total_tokens
@@ -312,7 +233,7 @@ def _call_openai_with_retry(system_prompt, user_prompt, response_format=None, ma
     total_tokens = 0
     for attempt in range(max_retries):
         try:
-            kwargs = {'model': 'gpt-4o', 'messages': messages}
+            kwargs = {'model': default_chat_model, 'messages': messages}
             if response_format:
                 kwargs['response_format'] = response_format
             response = client.chat.completions.create(**kwargs)
@@ -343,26 +264,7 @@ def _validate_bundle(text):
 
 def generate_bundle(topic, platform='', tone='حرفه‌ای'):
     """Generate full text, short text, hashtags and title in one OpenAI call."""
-    system_prompt = (
-        'You are an expert Persian content creator. '
-        'Return only a valid JSON object with no Markdown or extra explanation. '
-        'The JSON must contain exactly these keys: full_text, short_text, hashtags, title.'
-    )
-    user_prompt = f"""محتوای جامع برای این موضوع بساز:
-موضوع: {topic}
-پلتفرم: {platform}
-لحن: {tone}
-
-خروجی باید JSON باشد با این ساختار:
-{{
-  "full_text": "متن کامل و نسبتاً بلند (حداقل ۵۰۰ کاراکتر)",
-  "short_text": "نسخه خلاصه و کوتاه مناسب تلگرام/بله، حداکثر ۴۰۰ کاراکتر",
-  "hashtags": ["هشتگ۱", "هشتگ۲", "هشتگ۳", "هشتگ۴", "هشتگ۵"],
-  "title": "یک عنوان جذاب و کوتاه"
-}}
-
-فقط JSON خالص بدون توضیح اضافه برگردان."""
-
+    system_prompt, user_prompt = prompts.build_bundle_prompt(topic, platform, tone)
     data, error, tokens = _call_openai_with_retry(
         system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3, validate=_validate_bundle
     )
@@ -380,50 +282,7 @@ def _validate_variants(count):
 
 def generate_variants(capability, params, count=2):
     """Generate N variants for a given capability in one OpenAI call."""
-    system_prompt = (
-        'You are an expert Persian content creator. '
-        'Return only a valid JSON object with no Markdown or extra explanation. '
-        'The JSON must contain exactly one key: "variants" which is an array of strings.'
-    )
-
-    capability_labels = {
-        'text': 'تولید متن',
-        'rewrite': 'بازنویسی',
-        'summary': 'خلاصه‌سازی',
-        'scenario': 'سناریو',
-        'title': 'پیشنهاد عنوان',
-        'hashtag': 'پیشنهاد هشتگ',
-        'cta': 'CTA',
-        'idea': 'ایده محتوا',
-    }
-    label = capability_labels.get(capability, 'تولید محتوا')
-
-    topic = params.get('topic', params.get('goal', params.get('niche', params.get('text', ''))))
-    tone = params.get('tone', 'حرفه‌ای')
-    platform = params.get('platform', '')
-    length = params.get('length', 'brief')
-    word_count = params.get('word_count', 300)
-
-    capability_prompts = {
-        'text': f'با لحن {tone} و برای پلتفرم {platform}، {count} متن متفاوت برای موضوع زیر بنویس. هر نسخه حدود {word_count} کلمه داشته باشد.',
-        'rewrite': f'متن زیر را با {count} لحن/زاویه متفاوت بازنویسی کن. لحن پیشنهادی: {tone}.',
-        'summary': f'متن زیر را در {count} خلاصه با طول یا زاویه متفاوت خلاصه کن. طول مورد نظر: {length}.',
-        'scenario': f'برای موضوع {topic} و پلتفرم {platform} با هدف {params.get("goal", "")}، {count} سناریوی محتوایی متفاوت بنویس.',
-        'title': f'{count} عنوان متفاوت برای موضوع {topic} پیشنهاد بده.',
-        'hashtag': f'{count} هشتگ متفاوت برای موضوع {topic} و پلتفرم {platform} پیشنهاد بده.',
-        'cta': f'{count} CTA متفاوت برای هدف {topic} و پلتفرم {platform} بنویس.',
-        'idea': f'{count} ایده متفاوت برای حوزه {topic} و پلتفرم {platform} پیشنهاد بده.',
-    }
-
-    body_context = f"\n\nمحتوا/متن/ورودی:\n{topic}" if topic else ''
-    user_prompt = f"""{capability_prompts.get(capability, f'{count} نسخه متفاوت برای {label} تولید کن')}
-
-خروجی باید JSON باشد:
-{{
-  "variants": ["نسخه ۱", "نسخه ۲", "نسخه ۳"]
-}}
-
-هر آیتم آرایه یک نسخه کامل و مستقل باشد. فقط JSON خالص بدون توضیح اضافه برگردان.{body_context}"""
+    system_prompt, user_prompt = prompts.build_variants_prompt(capability, params, count)
 
     variants, error, tokens = _call_openai_with_retry(
         system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3, validate=_validate_variants(count)

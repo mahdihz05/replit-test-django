@@ -150,12 +150,12 @@ export default function AiGenerate() {
         break;
       case "rewrite":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/rewrite/`, {
-          method: "POST", data: { text: inputText, tone, ...img }
+          method: "POST", data: { text: inputText, tone, platform, ...img }
         });
         break;
       case "summary":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/summary/`, {
-          method: "POST", data: { text: inputText, length: summaryLength, ...img }
+          method: "POST", data: { text: inputText, length: summaryLength, platform, ...img }
         });
         break;
       case "scenario":
@@ -165,7 +165,7 @@ export default function AiGenerate() {
         break;
       case "title":
         response = await apiFetch(`/workspaces/${wid}/ai/generate/titles/`, {
-          method: "POST", data: { topic, count: parseInt(count), ...img }
+          method: "POST", data: { topic, count: parseInt(count), platform, ...img }
         });
         break;
       case "hashtag":
@@ -371,27 +371,36 @@ export default function AiGenerate() {
               <label className="text-sm font-medium block mb-1.5">متن ورودی *</label>
               <Textarea placeholder="متنی که می‌خواهید پردازش شود را اینجا وارد کنید..." value={inputText} onChange={e => setInputText(e.target.value)} className="min-h-[150px]" />
             </div>
-            {activeTab === "rewrite" && (
+            <div className="grid grid-cols-2 gap-3">
+              {activeTab === "rewrite" && (
+                <div>
+                  <label className="text-sm font-medium block mb-1.5">لحن بازنویسی</label>
+                  <Select value={tone} onValueChange={setTone}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>{TONES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              )}
               <div>
-                <label className="text-sm font-medium block mb-1.5">لحن بازنویسی</label>
-                <Select value={tone} onValueChange={setTone}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{TONES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}</SelectContent>
+                <label className="text-sm font-medium block mb-1.5">پلتفرم مقصد</label>
+                <Select value={platform} onValueChange={setPlatform}>
+                  <SelectTrigger><SelectValue placeholder="انتخاب کنید" /></SelectTrigger>
+                  <SelectContent>{PLATFORMS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-            )}
-            {activeTab === "summary" && (
-              <div>
-                <label className="text-sm font-medium block mb-1.5">طول خلاصه</label>
-                <Select value={summaryLength} onValueChange={setSummaryLength}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="brief">کوتاه و فشرده</SelectItem>
-                    <SelectItem value="detailed">جامع و کامل</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+              {activeTab === "summary" && (
+                <div>
+                  <label className="text-sm font-medium block mb-1.5">طول خلاصه</label>
+                  <Select value={summaryLength} onValueChange={setSummaryLength}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="brief">کوتاه و فشرده</SelectItem>
+                      <SelectItem value="detailed">جامع و کامل</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
           </div>
         );
       case "scenario":
@@ -576,7 +585,7 @@ export default function AiGenerate() {
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">ابزارهای هوش مصنوعی</h1>
-        <p className="text-muted-foreground mt-1">تولید محتوا با GPT-4o برای تمام نیازهای بازاریابی</p>
+        <p className="text-muted-foreground mt-1">تولید محتوا با GPT-4.1 mini برای تمام نیازهای بازاریابی</p>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">

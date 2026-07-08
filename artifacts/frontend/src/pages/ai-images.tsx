@@ -8,14 +8,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { ImageIcon, Loader2, Download, Wand2 } from "lucide-react";
 
+const PLATFORMS = [
+  { value: "", label: "عمومی" },
+  { value: "telegram", label: "تلگرام" },
+  { value: "bale", label: "بله" },
+  { value: "instagram", label: "اینستاگرام" },
+  { value: "linkedin", label: "لینکدین" },
+  { value: "website", label: "وب‌سایت" },
+];
+
 export default function AiImages() {
   const { selectedWorkspace } = useAuth();
   const { toast } = useToast();
   const [prompt, setPrompt] = useState("");
   const [style, setStyle] = useState("vivid");
+  const [platform, setPlatform] = useState("");
   const [loading, setLoading] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
-  const [history, setHistory] = useState<{ url: string; prompt: string }[]>([]);
+  const [history, setHistory] = useState<{ url: string; prompt: string; platform: string }[]>([]);
 
   const handleGenerate = async () => {
     if (!prompt.trim() || !selectedWorkspace) return;
@@ -24,12 +34,12 @@ export default function AiImages() {
     try {
       const response = await apiFetch(`/workspaces/${selectedWorkspace.id}/ai/generate/image/`, {
         method: "POST",
-        data: { description: prompt, style }
+        data: { description: prompt, style, platform }
       });
       const url = response?.data?.image_url ?? response?.image_url;
       if (url) {
         setGeneratedUrl(url);
-        setHistory(prev => [{ url, prompt }, ...prev.slice(0, 11)]);
+        setHistory(prev => [{ url, prompt, platform }, ...prev.slice(0, 11)]);
       }
     } catch (error: any) {
       toast({ title: "خطا", description: error.message || "خطا در تولید تصویر", variant: "destructive" });
@@ -74,6 +84,17 @@ export default function AiImages() {
                 <SelectContent>
                   <SelectItem value="vivid">پرجنب‌وجوش (Vivid)</SelectItem>
                   <SelectItem value="natural">طبیعی (Natural)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium block mb-1.5">پلتفرم مقصد</label>
+              <Select value={platform} onValueChange={setPlatform}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PLATFORMS.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -139,7 +160,7 @@ export default function AiImages() {
               <div key={i} className="group relative rounded-lg overflow-hidden border shadow-sm cursor-pointer" onClick={() => setGeneratedUrl(item.url)}>
                 <img src={item.url} alt={item.prompt} className="w-full aspect-square object-cover" />
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
-                  <p className="text-white text-xs line-clamp-2">{item.prompt}</p>
+                  <p className="text-white text-xs line-clamp-2">{item.prompt}{item.platform ? ` • ${item.platform}` : ""}</p>
                 </div>
               </div>
             ))}

@@ -61,11 +61,11 @@ def _create_batch_and_text_item(workspace_id, user, mode, capability, request_da
     return batch, item
 
 
-def _generate_image_for_batch(batch, source_text, wallet, cost):
+def _generate_image_for_batch(batch, source_text, wallet, cost, platform=''):
     """Generate a DALL-E image from source text and attach it to the batch as a GeneratedItem."""
     batch.image_status = 'pending'
     batch.save(update_fields=['image_status'])
-    image_path, error = openai_client.generate_image_from_text(source_text)
+    image_path, error = openai_client.generate_image_from_text(source_text, platform=platform)
     if error or not image_path:
         batch.image_status = 'failed'
         batch.save(update_fields=['image_status'])
@@ -162,7 +162,7 @@ def send_message(request, workspace_id, session_id):
         role='assistant',
         type='text',
         body=result,
-        metadata={'tokens': tokens, 'model': 'gpt-4o'}
+        metadata={'tokens': tokens, 'model': 'gpt-4.1-mini'}
     )
 
     return Response({'success': True, 'data': AIChatMessageSerializer(ai_msg).data})
@@ -183,13 +183,15 @@ def generate_text(request, workspace_id):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
 
     goal = request.data.get('goal', '')
+    platform = request.data.get('platform', '')
     result, error, tokens = openai_client.generate_text(
         goal=goal,
-        platform=request.data.get('platform', ''),
+        platform=platform,
         tone=request.data.get('tone', 'حرفه‌ای'),
         keywords=request.data.get('keywords', ''),
         language=request.data.get('language', 'fa'),
-        word_count=request.data.get('word_count', 300)
+        word_count=request.data.get('word_count', 300),
+        is_caption=bool(request.data.get('generate_image'))
     )
 
     if error:
@@ -208,7 +210,7 @@ def generate_text(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, image_error = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            image_item, image_error = _generate_image_for_batch(batch, result, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -232,9 +234,11 @@ def generate_image_view(request, workspace_id):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
 
     description = request.data.get('description', '')
+    platform = request.data.get('platform', '')
     result, error = openai_client.generate_image(
         description=description,
-        style=request.data.get('style', '')
+        style=request.data.get('style', ''),
+        platform=platform
     )
 
     if error:
@@ -261,7 +265,8 @@ def rewrite_text(request, workspace_id):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
 
     text = request.data.get('text', '')
-    result, error, tokens = openai_client.rewrite_text(text, request.data.get('tone', 'حرفه‌ای'))
+    platform = request.data.get('platform', '')
+    result, error, tokens = openai_client.rewrite_text(text, request.data.get('tone', 'حرفه‌ای'), platform=platform)
 
     if error:
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
@@ -279,7 +284,7 @@ def rewrite_text(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -303,7 +308,8 @@ def suggest_titles(request, workspace_id):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
 
     topic = request.data.get('topic', '')
-    result, error, tokens = openai_client.suggest_titles(topic)
+    platform = request.data.get('platform', '')
+    result, error, tokens = openai_client.suggest_titles(topic, platform=platform)
 
     if error:
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
@@ -321,7 +327,7 @@ def suggest_titles(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, _ = _generate_image_for_batch(batch, topic, image_wallet, image_cost)
+            image_item, _ = _generate_image_for_batch(batch, topic, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -345,7 +351,8 @@ def suggest_hashtags(request, workspace_id):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
 
     topic = request.data.get('topic', '')
-    result, error, tokens = openai_client.suggest_hashtags(topic)
+    platform = request.data.get('platform', '')
+    result, error, tokens = openai_client.suggest_hashtags(topic, platform=platform)
 
     if error:
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
@@ -363,7 +370,7 @@ def suggest_hashtags(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, _ = _generate_image_for_batch(batch, topic, image_wallet, image_cost)
+            image_item, _ = _generate_image_for_batch(batch, topic, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -385,7 +392,8 @@ def generate_summary(request, workspace_id):
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
                         status=status.HTTP_402_PAYMENT_REQUIRED)
     text = request.data.get('text', '')
-    result, error, tokens = openai_client.generate_summary(text, request.data.get('length', 'brief'))
+    platform = request.data.get('platform', '')
+    result, error, tokens = openai_client.generate_summary(text, request.data.get('length', 'brief'), platform=platform)
     if error:
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -401,7 +409,7 @@ def generate_summary(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -423,8 +431,9 @@ def generate_scenario(request, workspace_id):
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
                         status=status.HTTP_402_PAYMENT_REQUIRED)
     topic = request.data.get('topic', '')
+    platform = request.data.get('platform', '')
     result, error, tokens = openai_client.generate_scenario(
-        topic, request.data.get('platform', ''), request.data.get('goal', ''))
+        topic, platform, request.data.get('goal', ''))
     if error:
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -440,7 +449,7 @@ def generate_scenario(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost)
+            image_item, _ = _generate_image_for_batch(batch, result, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -462,8 +471,9 @@ def generate_idea(request, workspace_id):
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
                         status=status.HTTP_402_PAYMENT_REQUIRED)
     niche = request.data.get('niche', '')
+    platform = request.data.get('platform', '')
     result, error, tokens = openai_client.generate_idea(
-        niche, request.data.get('platform', ''), int(request.data.get('count', 5)))
+        niche, platform, int(request.data.get('count', 5)))
     if error:
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
@@ -479,7 +489,7 @@ def generate_idea(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, _ = _generate_image_for_batch(batch, niche, image_wallet, image_cost)
+            image_item, _ = _generate_image_for_batch(batch, niche, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -503,7 +513,8 @@ def generate_cta(request, workspace_id):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
 
     goal = request.data.get('goal', '')
-    result, error, tokens = openai_client.generate_cta(goal, request.data.get('platform', ''))
+    platform = request.data.get('platform', '')
+    result, error, tokens = openai_client.generate_cta(goal, platform)
 
     if error:
         return Response({'success': False, 'error': error, 'code': 'AI_ERROR'},
@@ -521,7 +532,7 @@ def generate_cta(request, workspace_id):
             batch.status = 'success'
             batch.wallet_cost_charged = cost
             batch.save(update_fields=['status', 'wallet_cost_charged'])
-            image_item, _ = _generate_image_for_batch(batch, goal, image_wallet, image_cost)
+            image_item, _ = _generate_image_for_batch(batch, goal, image_wallet, image_cost, platform=platform)
             items = [item]
             if image_item:
                 items.append(image_item)
@@ -583,9 +594,10 @@ def generate_bundle(request, workspace_id):
 
     batch = _create_generation_batch(workspace_id, request.user, 'bundle', 'text', request.data)
 
+    platform = request.data.get('platform', '')
     result, error, tokens = openai_client.generate_bundle(
         topic=topic,
-        platform=request.data.get('platform', ''),
+        platform=platform,
         tone=request.data.get('tone', 'حرفه‌ای'),
     )
 
@@ -620,7 +632,7 @@ def generate_bundle(request, workspace_id):
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             image_source = result.get('full_text') or result.get('title') or topic
-            image_item, image_error = _generate_image_for_batch(batch, image_source, image_wallet, image_cost)
+            image_item, image_error = _generate_image_for_batch(batch, image_source, image_wallet, image_cost, platform=platform)
             if image_error:
                 batch.image_status = 'failed'
                 batch.save(update_fields=['image_status'])
@@ -694,7 +706,7 @@ def generate_multi_variant(request, workspace_id):
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             image_source = batch.topic
-            image_item, image_error = _generate_image_for_batch(batch, image_source, image_wallet, image_cost)
+            image_item, image_error = _generate_image_for_batch(batch, image_source, image_wallet, image_cost, platform=batch.platform)
             if image_error:
                 batch.image_status = 'failed'
                 batch.save(update_fields=['image_status'])
@@ -734,7 +746,7 @@ def regenerate_image_for_item(request, workspace_id, item_id):
                         status=status.HTTP_402_PAYMENT_REQUIRED)
 
     image_item, image_error = _generate_image_for_batch(
-        item.batch, item.content, wallet, cost
+        item.batch, item.content, wallet, cost, platform=item.batch.platform
     )
     if image_error:
         return Response({'success': False, 'error': image_error, 'code': 'AI_ERROR'},
