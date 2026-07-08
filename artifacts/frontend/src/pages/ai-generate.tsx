@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Wand2, Copy, Save, Loader2, CheckCheck, Image, RefreshCcw } from "lucide-react";
+import { Wand2, Copy, Save, Loader2, CheckCheck, Image, RefreshCcw, Wallet } from "lucide-react";
 
 type Tab = "text" | "rewrite" | "summary" | "scenario" | "title" | "hashtag" | "cta" | "idea";
 type Mode = "standard" | "bundle" | "multi_variant";
@@ -96,10 +96,18 @@ export default function AiGenerate() {
   const [includeImage, setIncludeImage] = useState(false);
   const [imageRegenerating, setImageRegenerating] = useState<Record<string, boolean>>({});
   const [imagePreviewOpen, setImagePreviewOpen] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
 
   const wid = selectedWorkspace?.id;
 
-  const IMAGE_COST = 12;
+  const IMAGE_COST = 25;
+
+  useEffect(() => {
+    if (!wid) return;
+    apiFetch(`/workspaces/${wid}/wallet/`)
+      .then(res => setWalletBalance(res?.data?.balance ?? 0))
+      .catch(() => setWalletBalance(null));
+  }, [wid]);
 
   const estimatedCost = () => {
     let base = 0;
@@ -579,6 +587,8 @@ export default function AiGenerate() {
     return false;
   };
 
+  const hasInsufficientBalance = walletBalance !== null && walletBalance < estimatedCost();
+
   const resultText = Array.isArray(result) ? result.join("\n") : result;
 
   return (
@@ -642,14 +652,25 @@ export default function AiGenerate() {
                   <Image className="w-3.5 h-3.5" /> تولید تصویر همزمان با متن (+{IMAGE_COST} تومان)
                 </Label>
               </div>
-              <div className="text-sm text-muted-foreground flex items-center justify-between">
-                <span>هزینه تخمینی: <strong className="text-foreground">{estimatedCost()} تومان</strong></span>
+              <div className="text-sm flex items-center justify-between">
+                <span className="text-muted-foreground">هزینه تخمینی: <strong className="text-foreground">{estimatedCost()} تومان</strong></span>
+                {walletBalance !== null && (
+                  <span className={`flex items-center gap-1 ${hasInsufficientBalance ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                    <Wallet className="w-3.5 h-3.5" />
+                    موجودی: {walletBalance.toLocaleString("fa-IR")} تومان
+                  </span>
+                )}
               </div>
+              {hasInsufficientBalance && (
+                <div className="text-xs text-destructive bg-destructive/10 rounded-lg p-2">
+                  موجودی کیف پول کافی نیست. لطفاً از صفحهٔ کیف پول شارژ کنید.
+                </div>
+              )}
             </div>
             <Button
               className="w-full gap-2 mt-2"
               onClick={handleGenerate}
-              disabled={loading || isGenerateDisabled()}
+              disabled={loading || isGenerateDisabled() || hasInsufficientBalance}
               size="lg"
             >
               {loading

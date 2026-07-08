@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ImageIcon, Loader2, Download, Wand2 } from "lucide-react";
+import { ImageIcon, Loader2, Download, Wand2, Wallet } from "lucide-react";
 
 const PLATFORMS = [
   { value: "", label: "عمومی" },
@@ -26,9 +26,20 @@ export default function AiImages() {
   const [loading, setLoading] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [history, setHistory] = useState<{ url: string; prompt: string; platform: string }[]>([]);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const IMAGE_COST = 25;
+
+  useEffect(() => {
+    if (!selectedWorkspace) return;
+    apiFetch(`/workspaces/${selectedWorkspace.id}/wallet/`)
+      .then(res => setWalletBalance(res?.data?.balance ?? 0))
+      .catch(() => setWalletBalance(null));
+  }, [selectedWorkspace]);
+
+  const hasInsufficientBalance = walletBalance !== null && walletBalance < IMAGE_COST;
 
   const handleGenerate = async () => {
-    if (!prompt.trim() || !selectedWorkspace) return;
+    if (!prompt.trim() || !selectedWorkspace || hasInsufficientBalance) return;
     setLoading(true);
     setGeneratedUrl(null);
     try {
@@ -99,13 +110,19 @@ export default function AiImages() {
               </Select>
             </div>
             <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-xs text-amber-800 dark:text-amber-400">
-              ⚠️ هر بار تولید تصویر کردیت از کیف پول کسر می‌شود
+              ⚠️ هر بار تولید تصویر {IMAGE_COST.toLocaleString("fa-IR")} تومان از کیف پول کسر می‌شود
             </div>
+            {walletBalance !== null && (
+              <div className={`text-xs flex items-center justify-between ${hasInsufficientBalance ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                <span className="flex items-center gap-1"><Wallet className="w-3.5 h-3.5" /> موجودی: {walletBalance.toLocaleString("fa-IR")} تومان</span>
+                {hasInsufficientBalance && <span>موجودی کافی نیست</span>}
+              </div>
+            )}
             <Button
               className="w-full gap-2"
               size="lg"
               onClick={handleGenerate}
-              disabled={loading || !prompt.trim()}
+              disabled={loading || !prompt.trim() || hasInsufficientBalance}
             >
               {loading
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> در حال تولید تصویر...</>

@@ -59,7 +59,8 @@ export async function apiFetch(endpoint: string, options: FetchOptions = {}) {
       window.location.href = "/login";
     }
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || errorData.message || "خطا در برقراری ارتباط با سرور");
+    const message = errorData.error || errorData.detail || errorData.message || "خطا در برقراری ارتباط با سرور";
+    throw new Error(message);
   }
 
   // Some endpoints might return empty response

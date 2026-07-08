@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 import requests
 from django.conf import settings
 
@@ -87,7 +88,37 @@ def generate_cta(goal, platform='', count=3):
     return ctas, None, tokens
 
 
+def _save_image_from_url(image_url: str) -> str:
+    """Download an image URL and save it to MEDIA_ROOT/content/images, returning the relative path."""
+    from django.conf import settings as django_settings
+    import uuid
+
+    os.makedirs(os.path.join(django_settings.MEDIA_ROOT, 'content/images'), exist_ok=True)
+    filename = f'{uuid.uuid4()}.png'
+    filepath = os.path.join(django_settings.MEDIA_ROOT, 'content/images', filename)
+
+    img_response = requests.get(image_url, timeout=60)
+    img_response.raise_for_status()
+    with open(filepath, 'wb') as f:
+        f.write(img_response.content)
+
+    return f'content/images/{filename}'
+
+
+def _generate_with_pollinations(prompt: str, width: int = 1024, height: int = 1024):
+    """Generate an image using Pollinations.ai (no API key required). Returns a public image URL."""
+    encoded = urllib.parse.quote(prompt)
+    url = f'https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&nologo=true&seed=42&enhance=true'
+    # Pollinations streams the image; do a quick HEAD/GET to confirm it works.
+    test_resp = requests.get(url, timeout=60)
+    test_resp.raise_for_status()
+    if not test_resp.headers.get('content-type', '').startswith('image'):
+        raise Exception('Pollinations response was not an image')
+    return url
+
+
 def generate_image(description, style='', platform=''):
+    """Generate an image. Try DALL-E 3 first; fall back to Pollinations.ai if OpenAI image models are unavailable."""
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
         return None, 'کلید API هوش مصنوعی تنظیم نشده است'
@@ -96,6 +127,8 @@ def generate_image(description, style='', platform=''):
     if style:
         prompt += f', style: {style}'
 
+    # Try OpenAI DALL-E 3 first.
+    openai_error = None
     try:
         response = client.images.generate(
             model='dall-e-3',
@@ -105,23 +138,18 @@ def generate_image(description, style='', platform=''):
             n=1
         )
         image_url = response.data[0].url
-
-        import os
-        import uuid
-        from django.conf import settings as django_settings
-
-        os.makedirs(os.path.join(django_settings.MEDIA_ROOT, 'content/images'), exist_ok=True)
-        filename = f'{uuid.uuid4()}.png'
-        filepath = os.path.join(django_settings.MEDIA_ROOT, 'content/images', filename)
-
-        img_response = requests.get(image_url, timeout=30)
-        with open(filepath, 'wb') as f:
-            f.write(img_response.content)
-
-        relative_path = f'content/images/{filename}'
+        relative_path = _save_image_from_url(image_url)
         return relative_path, None
     except Exception as e:
-        return None, str(e)
+        openai_error = str(e)
+
+    # Fallback: Pollinations.ai (free, no API key).
+    try:
+        image_url = _generate_with_pollinations(prompt, width=1024, height=1024)
+        relative_path = _save_image_from_url(image_url)
+        return relative_path, None
+    except Exception as e:
+        return None, f'OpenAI: {openai_error} | Pollinations: {str(e)}'
 
 
 def generate_image_prompt(source_text, max_words=25, platform=''):

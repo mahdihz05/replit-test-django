@@ -1,31 +1,82 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
+import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Wallet as WalletIcon, ArrowDownRight, ArrowUpRight, Plus } from "lucide-react";
+import { Wallet as WalletIcon, ArrowDownRight, ArrowUpRight, Plus, Loader2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+
+interface WalletTransaction {
+  id: string;
+  type: "charge" | "deduct";
+  amount: number;
+  description: string;
+  created_at: string;
+}
+
+interface WalletData {
+  id: string;
+  balance: number;
+  updated_at: string;
+  recent_transactions: WalletTransaction[];
+}
 
 export default function Wallet() {
   const { selectedWorkspace } = useAuth();
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const { toast } = useToast();
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [chargeLoading, setChargeLoading] = useState(false);
+  const [chargeAmount, setChargeAmount] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const loadWallet = async () => {
+    if (!selectedWorkspace) return;
+    setLoading(true);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/wallet/`);
+      const data = res?.data as WalletData;
+      setBalance(data?.balance ?? 0);
+      setTransactions(data?.recent_transactions ?? []);
+    } catch (error: any) {
+      toast({ title: "خطا", description: error.message || "بارگذاری کیف پول ناموفق بود", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    if (selectedWorkspace) {
-      setLoading(true);
-      setTimeout(() => {
-        setBalance(1250000);
-        setTransactions([
-          { id: "1", type: "charge", amount: 500000, description: "شارژ حساب از طریق درگاه پرداخت", created_at: new Date().toISOString() },
-          { id: "2", type: "deduct", amount: 45000, description: "هزینه تولید ۳ مقاله با هوش مصنوعی", created_at: new Date(Date.now() - 86400000).toISOString() },
-          { id: "3", type: "deduct", amount: 15000, description: "هزینه بازنویسی پست تلگرام", created_at: new Date(Date.now() - 172800000).toISOString() }
-        ]);
-        setLoading(false);
-      }, 500);
-    }
+    loadWallet();
   }, [selectedWorkspace]);
+
+  const handleCharge = async () => {
+    if (!selectedWorkspace || !chargeAmount) return;
+    const amount = parseFloat(chargeAmount);
+    if (!amount || amount <= 0) {
+      toast({ title: "مبلغ نامعتبر", description: "مبلغ شارژ باید بیشتر از صفر باشد", variant: "destructive" });
+      return;
+    }
+    setChargeLoading(true);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/wallet/charge/`, {
+        method: "POST",
+        data: { amount, description: "شارژ دستی کیف پول" }
+      });
+      const data = res?.data;
+      setBalance(data?.balance ?? 0);
+      setChargeAmount("");
+      setDialogOpen(false);
+      toast({ title: "شارژ شد", description: `موجودی جدید: ${(data?.balance ?? 0).toLocaleString("fa-IR")} تومان` });
+      await loadWallet();
+    } catch (error: any) {
+      toast({ title: "خطا", description: error.message || "شارژ ناموفق بود", variant: "destructive" });
+    } finally {
+      setChargeLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -45,7 +96,7 @@ export default function Wallet() {
                 {loading ? "..." : balance.toLocaleString('fa-IR')} <span className="text-lg font-normal opacity-80">تومان</span>
               </div>
             </div>
-            <Dialog>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="lg" className="bg-white text-primary hover:bg-white/90 gap-2 shrink-0">
                   <Plus className="w-5 h-5" /> افزایش موجودی
@@ -59,16 +110,26 @@ export default function Wallet() {
                 <div className="space-y-4 py-4">
                   <div className="grid grid-cols-3 gap-2">
                     {[100000, 200000, 500000].map(amount => (
-                      <Button key={amount} variant="outline" className="font-mono">
+                      <Button key={amount} variant="outline" className="font-mono" onClick={() => setChargeAmount(String(amount))}>
                         {amount.toLocaleString('fa-IR')}
                       </Button>
                     ))}
                   </div>
                   <div className="relative">
-                    <Input type="number" placeholder="مبلغ دلخواه" className="pl-16 font-mono text-left" dir="ltr" />
+                    <Input
+                      type="number"
+                      placeholder="مبلغ دلخواه"
+                      className="pl-16 font-mono text-left"
+                      dir="ltr"
+                      value={chargeAmount}
+                      onChange={(e) => setChargeAmount(e.target.value)}
+                    />
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">تومان</span>
                   </div>
-                  <Button className="w-full">پرداخت</Button>
+                  <Button className="w-full gap-2" onClick={handleCharge} disabled={chargeLoading}>
+                    {chargeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    پرداخت
+                  </Button>
                 </div>
               </DialogContent>
             </Dialog>
