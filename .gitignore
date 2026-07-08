@@ -50,3 +50,11 @@ Thumbs.db
 
 # Django media uploads (generated files, not source code)
 backend/media/
+
+# Environment / secret files
+.env
+.env.*
+.env.local
+.env.development
+.env.production
+*.env

@@ -10,6 +10,8 @@ class PublishChannelAdmin(admin.ModelAdmin):
     ordering = ('-created_at',)
     readonly_fields = ('id', 'created_at')
     raw_id_fields = ('workspace',)
+    # extra_data may contain platform credentials (e.g. website API keys); keep it out of admin
+    exclude = ('extra_data',)
 
 
 @admin.register(ChannelVerification)
