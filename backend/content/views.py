@@ -143,9 +143,9 @@ def publish_content(request, workspace_id, content_id):
                         status=status.HTTP_400_BAD_REQUEST)
 
     from channels_app.models import PublishChannel
-    from publishing.models import PublishJob
+    from publishing.models import PublishAttachment, PublishJob
 
-    jobs = []
+    job_objects = []
     for channel_id in channel_ids:
         try:
             channel = PublishChannel.objects.get(id=channel_id, workspace_id=workspace_id, is_active=True)
@@ -156,7 +156,23 @@ def publish_content(request, workspace_id, content_id):
             channel=channel,
             scheduled_at=scheduled_at
         )
-        jobs.append(str(job.id))
+        job_objects.append(job)
+
+    # If the content has an image, attach it to every job so publishers can send it.
+    if content.image:
+        attachment = PublishAttachment.objects.create(
+            workspace=content.workspace,
+            content=content,
+            file_path=content.image.name,
+            media_type='image',
+            mime_type='image/png',
+            file_size_bytes=content.image.size,
+            original_filename=content.image.name.split('/')[-1]
+        )
+        for job in job_objects:
+            job.attachments.add(attachment)
+
+    jobs = [str(job.id) for job in job_objects]
 
     if scheduled_at:
         content.status = 'scheduled'

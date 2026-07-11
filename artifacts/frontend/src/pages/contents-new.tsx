@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Bot, Save, Wand2, Calendar as CalendarIcon, ArrowRight } from "lucide-react";
+import { Bot, Save, Wand2, Calendar as CalendarIcon, ArrowRight, ImageIcon, X } from "lucide-react";
 import { Link } from "wouter";
 
 export default function ContentNew() {
@@ -17,9 +17,25 @@ export default function ContentNew() {
   
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
+  };
 
   const handleSave = async (status: string = "draft") => {
     if (!title) {
@@ -29,9 +45,18 @@ export default function ContentNew() {
     
     setLoading(true);
     try {
+      const payload = new FormData();
+      payload.append("title", title);
+      payload.append("body", body);
+      payload.append("status", status);
+      payload.append("language", "fa");
+      if (imageFile) {
+        payload.append("image", imageFile);
+      }
+      
       const data = await apiFetch(`/workspaces/${selectedWorkspace?.id}/contents/`, {
         method: "POST",
-        data: { title, body, status }
+        data: payload
       }).catch(() => ({ id: "new-id" })); // Fallback
       
       toast({ title: "موفق", description: "محتوا با موفقیت ذخیره شد" });
@@ -147,6 +172,37 @@ export default function ContentNew() {
                   بازنویسی متن
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <ImageIcon className="w-5 h-5" /> تصویر محتوا
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {imagePreview ? (
+                <div className="relative">
+                  <img src={imagePreview} alt="پیش‌نمایش تصویر" className="w-full rounded-lg border object-cover" />
+                  <button
+                    type="button"
+                    onClick={handleRemoveImage}
+                    className="absolute top-2 left-2 p-1 bg-black/50 text-white rounded-full hover:bg-black/70"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-muted/50 transition-colors">
+                  <div className="flex flex-col items-center justify-center text-muted-foreground">
+                    <ImageIcon className="w-8 h-8 mb-2" />
+                    <span className="text-sm">آپلود تصویر</span>
+                    <span className="text-xs">PNG, JPG, WEBP</span>
+                  </div>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+                </label>
+              )}
             </CardContent>
           </Card>
 

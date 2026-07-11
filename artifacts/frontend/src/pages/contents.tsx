@@ -20,6 +20,7 @@ interface Content {
   status: string;
   created_at: string;
   tags?: string[];
+  image_url?: string;
 }
 
 export default function Contents() {
@@ -115,15 +116,20 @@ export default function Contents() {
           {contents.map((item) => (
             <Card key={item.id} className="overflow-hidden hover:border-primary/50 transition-colors">
               <div className="flex flex-col sm:flex-row p-6 gap-4 sm:items-center justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Link href={`/contents/${item.id}`} className="font-medium text-lg hover:text-primary transition-colors">
-                      {item.title}
-                    </Link>
-                    {getStatusBadge(item.status)}
-                  </div>
-                  <div className="text-sm text-muted-foreground flex items-center gap-2">
-                    <span>ایجاد شده: {new Date(item.created_at).toLocaleDateString('fa-IR')}</span>
+                <div className="flex items-center gap-4">
+                  {item.image_url && (
+                    <img src={item.image_url} alt="" className="w-16 h-16 rounded-lg object-cover border" />
+                  )}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Link href={`/contents/${item.id}`} className="font-medium text-lg hover:text-primary transition-colors">
+                        {item.title}
+                      </Link>
+                      {getStatusBadge(item.status)}
+                    </div>
+                    <div className="text-sm text-muted-foreground flex items-center gap-2">
+                      <span>ایجاد شده: {new Date(item.created_at).toLocaleDateString('fa-IR')}</span>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

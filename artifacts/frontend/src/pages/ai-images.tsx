@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ImageIcon, Loader2, Download, Wand2, Wallet } from "lucide-react";
+import { ImageIcon, Loader2, Download, Wand2, Wallet, FileText } from "lucide-react";
+import { Link } from "wouter";
 
 const PLATFORMS = [
   { value: "", label: "عمومی" },
@@ -25,7 +26,8 @@ export default function AiImages() {
   const [platform, setPlatform] = useState("");
   const [loading, setLoading] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
-  const [history, setHistory] = useState<{ url: string; prompt: string; platform: string }[]>([]);
+  const [contentId, setContentId] = useState<string | null>(null);
+  const [history, setHistory] = useState<{ url: string; prompt: string; platform: string; contentId?: string }[]>([]);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const IMAGE_COST = 25;
 
@@ -48,9 +50,11 @@ export default function AiImages() {
         data: { description: prompt, style, platform }
       });
       const url = response?.data?.image_url ?? response?.image_url;
+      const id = response?.data?.content_id ?? response?.content_id;
       if (url) {
         setGeneratedUrl(url);
-        setHistory(prev => [{ url, prompt, platform }, ...prev.slice(0, 11)]);
+        setContentId(id || null);
+        setHistory(prev => [{ url, prompt, platform, contentId: id }, ...prev.slice(0, 11)]);
       }
     } catch (error: any) {
       toast({ title: "خطا", description: error.message || "خطا در تولید تصویر", variant: "destructive" });
@@ -163,6 +167,16 @@ export default function AiImages() {
                 >
                   <Download className="w-4 h-4" /> دانلود تصویر
                 </Button>
+                {contentId && (
+                  <Link href={`/contents/${contentId}`}>
+                    <Button className="w-full gap-2">
+                      <FileText className="w-4 h-4" /> مشاهده در محتواها
+                    </Button>
+                  </Link>
+                )}
+                <p className="text-xs text-muted-foreground text-center">
+                  این تصویر به عنوان پیش‌نویس در بخش محتواها ذخیره شد.
+                </p>
               </div>
             )}
           </CardContent>
@@ -174,7 +188,7 @@ export default function AiImages() {
           <h2 className="text-lg font-semibold mb-4">تاریخچه تصاویر</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
             {history.map((item, i) => (
-              <div key={i} className="group relative rounded-lg overflow-hidden border shadow-sm cursor-pointer" onClick={() => setGeneratedUrl(item.url)}>
+              <div key={i} className="group relative rounded-lg overflow-hidden border shadow-sm cursor-pointer" onClick={() => { setGeneratedUrl(item.url); setContentId(item.contentId || null); }}>
                 <img src={item.url} alt={item.prompt} className="w-full aspect-square object-cover" />
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
                   <p className="text-white text-xs line-clamp-2">{item.prompt}{item.platform ? ` • ${item.platform}` : ""}</p>

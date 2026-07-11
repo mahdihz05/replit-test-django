@@ -7,6 +7,7 @@ from workspaces.models import WorkspaceMember
 from wallet.models import Wallet, WalletTransaction
 from django.conf import settings
 
+from content.models import Content, ContentVersion
 from .models import AIChatSession, AIChatMessage, GenerationBatch, GeneratedItem
 from .serializers import AIChatSessionSerializer, AIChatSessionListSerializer, AIChatMessageSerializer, GeneratedItemSerializer
 from . import openai_client
@@ -235,9 +236,13 @@ def generate_image_view(request, workspace_id):
 
     description = request.data.get('description', '')
     platform = request.data.get('platform', '')
-    result, error = openai_client.generate_image(
-        description=description,
-        style=request.data.get('style', ''),
+    style = request.data.get('style', '')
+
+    # Convert the user's description into a vivid, platform-aware DALL-E prompt.
+    # This handles Persian input and produces a high-quality English prompt.
+    result, error = openai_client.generate_image_from_text(
+        source_text=description,
+        style=style,
         platform=platform
     )
 
@@ -246,8 +251,33 @@ def generate_image_view(request, workspace_id):
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     deduct_wallet(wallet, cost, f'تولید تصویر - {description[:50]}')
+
+    # Save the generated image as a Content draft so it appears in the library
+    # and can be published to Telegram/Bale later.
+    from content.models import Content
+    content = Content.objects.create(
+        workspace_id=workspace_id,
+        created_by=request.user,
+        title=description[:100] or 'تصویر تولید شده',
+        body=description,
+        status='draft',
+        language='fa',
+        goal=description[:300],
+        image=result
+    )
+    ContentVersion.objects.create(
+        content=content,
+        body=description,
+        version_number=1,
+        source='ai'
+    )
+
     image_url = f'/media/{result}' if result else None
-    return Response({'success': True, 'data': {'image_url': image_url, 'path': result}})
+    return Response({'success': True, 'data': {
+        'image_url': image_url,
+        'path': result,
+        'content_id': str(content.id)
+    }})
 
 
 @api_view(['POST'])
