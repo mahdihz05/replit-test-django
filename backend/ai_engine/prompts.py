@@ -22,71 +22,132 @@ def _normalize_platform(platform: str) -> str:
 # Platform rules used in prompt bodies
 # ---------------------------------------------------------------------------
 
+def _platform_persona(platform: str) -> str:
+    """Return a short role/persona line that activates the right domain expertise."""
+    p = _normalize_platform(platform)
+    personas = {
+        "telegram": "You are an experienced Telegram/Bale channel writer who explains useful ideas in a "
+                    "warm, conversational voice — think 'a sharp friend explaining something useful', not "
+                    "a news anchor or a textbook.",
+        "bale": "You are an experienced Telegram/Bale channel writer who explains useful ideas in a "
+                "warm, conversational voice — think 'a sharp friend explaining something useful', not "
+                "a news anchor or a textbook.",
+        "linkedin": "You are a senior B2B copywriter who ghostwrites for founders and industry experts on "
+                    "LinkedIn. You are known for posts that open with a real hook and deliver one specific, "
+                    "non-obvious insight — never generic career-advice filler.",
+        "instagram": "You are a social media caption writer who specializes in short, visual-first captions "
+                     "that make people stop scrolling in the first line.",
+        "website": "You are an experienced Persian content writer and SEO editor who writes articles that "
+                   "directly and thoroughly answer the reader's question, in the style of a trusted "
+                   "publication, not a content farm.",
+    }
+    return personas.get(p, "You are an expert Persian content writer.")
+
+
 def get_platform_rules(platform: str) -> str:
-    """Return a concise block of formatting rules for the requested platform."""
+    """Return formatting AND content-quality rules for the requested platform, with a short good/bad example."""
     p = _normalize_platform(platform)
 
     if p in ("telegram", "bale"):
         return (
-            "Platform rules (Telegram/Bale):\n"
+            "Platform rules (Telegram/Bale, verified 2026):\n"
             "- Output must be in Persian.\n"
-            "- Use ONLY Telegram's limited Markdown: *bold* with a single asterisk, "
-            "_italic_ with a single underscore, `monospace` with a single backtick.\n"
-            "- NEVER use standard Markdown such as **bold**, # headings, or '- ' list bullets.\n"
-            "- Instead of headings, use blank lines between short paragraphs and emojis at the "
-            "start of lines (e.g., ✅ 🔹 👇) to separate sections.\n"
-            "- Keep paragraphs short (2-4 lines) because most users read on mobile.\n"
-            "- If the output will be used as a caption for an image, keep it under 1024 characters. "
-            "If it is a standalone message, it may be up to 4096 characters.\n"
+            "- HIGHEST PRIORITY CONSTRAINT: if this is an image caption, stay under 1024 characters; "
+            "otherwise stay under 4096 characters.\n"
+            "- Use ONLY Telegram's limited Markdown: *bold* with a single asterisk, _italic_ with a single "
+            "underscore, `monospace` with a single backtick. NEVER use **bold**, # headings, or '- ' bullets.\n"
+            "- Use blank lines between short paragraphs and emojis at the start of lines (e.g., ✅ 🔹 👇) "
+            "instead of headings. Keep paragraphs to 2-4 lines for mobile readability.\n"
             "- Hashtags: 3-5 in a single line at the end.\n"
+            "- CONTENT STANDARD ('edutainment'): every post must teach something or solve a problem, "
+            "delivered informally — like a knowledgeable friend explaining it, not a lecture. The requested "
+            "tone changes the DELIVERY, not whether there's real substance:\n"
+            "  * specialist/professional tone -> simple language, still ONE solid actionable insight, no dense jargon\n"
+            "  * casual/fun tone -> more jokes/emojis, looser structure, but still ends with one real takeaway\n"
+            "- GOOD example opening: 'یه اشتباه که ۹۰٪ آدما توی بودجه‌بندی ماهانه می‌کنن؟ فکر می‌کنن پس‌انداز "
+            "یعنی چیزی که ته ماه می‌مونه 👇' (concrete claim, curiosity, promise of value)\n"
+            "- BAD opening to avoid: 'سلام دوستان عزیز، امروز می‌خوایم راجع به یه موضوع مهم صحبت کنیم' "
+            "(generic throat-clearing with zero information)\n"
             "- No extra introduction, no markdown code fences, just the ready-to-publish body."
         )
 
     if p == "linkedin":
         return (
-            "Platform rules (LinkedIn):\n"
+            "Platform rules (LinkedIn, verified 2026 data):\n"
             "- Output must be in Persian.\n"
-            "- LinkedIn does NOT render Markdown. NEVER output raw **bold**, # headings, or '- ' lists.\n"
-            "- For real visual emphasis, use actual Unicode bold/italic characters only for the "
-            "opening hook or a single key phrase/number in the text (e.g., 𝗯𝗼𝗹𝗱 from the Mathematical "
-            "Bold Unicode range). Do NOT convert whole paragraphs to Unicode bold.\n"
-            "- For bullets, use Unicode characters such as • or ▸ at the start of a line.\n"
-            "- Hashtags must be plain text (no Unicode styling) so they remain searchable. "
-            "Use 3-5 hashtags in a single line at the end.\n"
-            "- The first two lines must be independent, compelling, and contain a clear hook "
-            "(a surprising statistic, counter-intuitive claim, or direct question).\n"
-            "- Avoid an early blank line right after the hook; it can trigger LinkedIn's 'see more' fold.\n"
-            "- Target length is 1300-2000 characters as a soft guideline; do not force it if the topic "
-            "naturally needs a bit more or less.\n"
+            "- HIGHEST PRIORITY CONSTRAINT: LinkedIn truncates posts behind 'see more' after ~140-210 "
+            "characters on mobile. The first 1-2 lines MUST work as a fully independent hook (a contrarian "
+            "statement, a surprising statistic, or a direct question) — most readers never tap 'see more', "
+            "so nothing essential can depend on later text.\n"
+            "- Do not put a blank line immediately after the hook; it can cut the visible snippet shorter.\n"
+            "- LinkedIn does NOT render Markdown. NEVER output **bold**, # headings, or '- ' lists. For "
+            "emphasis, use real Unicode bold (𝗹𝗶𝗸𝗲 𝘁𝗵𝗶𝘀) only on the hook or one key number — never a "
+            "whole paragraph. For bullets use • or ▸.\n"
+            "- Hashtags: plain text only, 3-5 max at the end; more than 5 hurts reach.\n"
+            "- Target 1300-2500 characters (soft target); posts under ~400 characters underperform. Hard "
+            "ceiling is 3000 characters.\n"
+            "- Structure: hook -> concrete context (one problem, one moment, one example, ideally with a "
+            "specific number) -> the lesson/framework/insight -> a soft closing question inviting comments, "
+            "not a hard sales pitch.\n"
+            "- CONTENT STANDARD: the requested tone must be pushed further here than on any other platform:\n"
+            "  * specialist/professional tone -> go DEEPER than elsewhere: a named framework, a specific "
+            "number, a real before/after result. Generic advice ('consistency matters', 'communication is "
+            "key') is a failure state on this platform.\n"
+            "  * casual/personal tone -> still resolve into a professional lesson by the end (story -> "
+            "takeaway relevant to work), not just entertainment.\n"
+            "- GOOD hook example: '۳ سال پیش یه مشتری رو به خاطر یه ایمیل از دست دادیم. الان می‌دونم مشکل "
+            "چی بود.' (specific, creates a real curiosity gap)\n"
+            "- BAD hook example: 'در دنیای امروز، ارتباط مؤثر یکی از مهم‌ترین مهارت‌هاست.' (generic "
+            "truism, no hook, no reason to keep reading)\n"
             "- No extra introduction, no markdown code fences, just the ready-to-publish body."
         )
 
     if p == "instagram":
         return (
-            "Platform rules (Instagram):\n"
+            "Platform rules (Instagram, verified 2026 data):\n"
             "- Output must be in Persian.\n"
-            "- Keep the caption friendly and visual; avoid heavy Markdown.\n"
-            "- Line breaks and emojis are fine for readability.\n"
-            "- Hashtags: 3-5 relevant hashtags in a single line at the end.\n"
+            "- HIGHEST PRIORITY CONSTRAINT: Instagram truncates behind 'more' after ~125 characters. The "
+            "hook/question/key message must be in the very first line.\n"
+            "- No Markdown or bold/italic is rendered; rely only on line breaks and emojis for structure. "
+            "Use generous line breaks between short thoughts — walls of text get scrolled past.\n"
+            "- End with a light call to action (a question, 'ذخیره کن', 'نظرت رو بگو') to drive saves/"
+            "comments, which the algorithm weighs heavily.\n"
+            "- Hashtags: 3-5 highly relevant ones on their own line at the end; 10+ can trigger silent "
+            "reach suppression.\n"
+            "- CONTENT STANDARD: visual-first and emotionally engaging, supporting an image rather than "
+            "replacing one.\n"
+            "  * specialist/professional tone -> short, punchy, highly scannable tips, never a lecture\n"
+            "  * casual/fun tone -> storytelling and personality can lead more openly\n"
             "- No extra introduction, just the ready-to-publish caption."
         )
 
     if p in ("website", "wordpress"):
         return (
-            "Platform rules (Website/WordPress article):\n"
+            "Platform rules (Website/WordPress article, verified 2026 SEO/GEO practice):\n"
             "- Output must be in Persian.\n"
-            "- Produce real HTML: <h2> for sections, <h3> for subsections, <p> for paragraphs, "
-            "<ul>/<li> for lists. Do NOT use Markdown.\n"
-            "- Structure: intro paragraph (no heading) → 2-4 sections with <h2> → conclusion.\n"
-            "- Respect the requested word count exactly; do not artificially shorten the article.\n"
+            "- Produce real HTML: <h2> sections, <h3> subsections, <p> paragraphs, <ul>/<li> lists. No Markdown.\n"
+            "- HIGHEST PRIORITY CONSTRAINT: the first 2-3 sentences must directly state the core answer/value "
+            "and include the main topic within the first ~100 words — both human readers and AI search "
+            "engines (ChatGPT, Google AI Overviews, Perplexity) extract answers from the top of the page.\n"
+            "- 3-5 <h2> sections phrased as natural questions/statements a reader would search for, each able "
+            "to stand alone as a direct answer. Close with a short practical takeaway.\n"
+            "- Target ~1500-2000 words for a standard article (600-900 for a narrow how-to, 2500+ for a "
+            "pillar guide). Preserve this structure even with a shorter requested word_count — compress "
+            "sections, don't drop them.\n"
+            "- CONTENT STANDARD: judged on depth and trustworthiness, not personality. Regardless of tone, "
+            "prioritize accuracy, concrete examples, and directly answering the reader's question over filler.\n"
+            "  * specialist/professional tone -> precise terminology, real mechanisms/steps/data\n"
+            "  * casual/accessible tone -> simpler language but SAME depth of information, not less content\n"
+            "- BAD pattern to avoid: a paragraph that just restates the heading in different words without "
+            "adding new information ('در این بخش به بررسی اهمیت X می‌پردازیم' with no actual content after it).\n"
             "- No extra introduction, no markdown code fences, just the ready-to-publish HTML."
         )
 
-    # Generic fallback
     return (
         "General rules:\n"
         "- Output must be in Persian.\n"
         "- Avoid raw Markdown formatting such as **bold** or # headings unless explicitly requested.\n"
+        "- Prioritize concrete, specific, useful content over generic filler, regardless of tone.\n"
         "- Keep the output ready to publish with no extra explanation."
     )
 
@@ -96,31 +157,44 @@ def get_platform_rules(platform: str) -> str:
 # ---------------------------------------------------------------------------
 
 def build_text_prompt(goal: str, platform: str, tone: str, keywords: str, language: str, word_count: int, is_caption: bool = False) -> tuple[str, str]:
-    """Return (system_prompt, user_prompt) for generate_text."""
+    """Return (system_prompt, user_prompt) for generate_text, built with a Role-Context-Constraints-Format structure."""
     system = (
-        "You are an expert Persian content creator for social media and websites. "
-        "You write platform-native content that needs no manual editing before publishing. "
-        "You always respect the requested length and output exactly the amount of content asked for."
+        f"{_platform_persona(platform)} "
+        "You write platform-native Persian content that needs no manual editing before publishing. "
+        "You never pad with generic filler — every sentence must carry real information or move the reader forward. "
+        "When a word count is requested, you MUST hit that target within ±10% even if it makes the output longer than a platform's usual recommendation."
     )
+
     caption_note = ""
     if is_caption and _normalize_platform(platform) in ("telegram", "bale"):
         caption_note = (
-            "IMPORTANT: This text will be used as a caption for an image on Telegram/Bale. "
-            "Keep it under 1024 characters. Make it concise and impactful.\n"
+            "IMPORTANT: This text will be used as an image caption on Telegram/Bale. "
+            "Keep it under 1024 characters and make it concise and impactful.\n"
         )
+
     user = (
-        f"{get_platform_rules(platform)}\n\n"
-        f"Write content with these specifications:\n"
-        f"Goal/topic: {goal}\n"
+        f"<platform_rules>\n{get_platform_rules(platform)}\n</platform_rules>\n\n"
+        f"<task>\n"
+        f"Write ready-to-publish content on this topic: {goal}\n"
+        f"</task>\n\n"
+        f"<context>\n"
         f"Platform: {platform or 'general'}\n"
         f"Tone: {tone}\n"
-        f"Keywords: {keywords}\n"
+        f"Keywords to weave in naturally: {keywords}\n"
         f"Language: {'Persian' if language == 'fa' else language}\n"
-        f"STRICT LENGTH REQUIREMENT: The final output must be approximately {word_count} words. "
-        f"Stay within ±10% of {word_count} words ({int(word_count * 0.9)}–{int(word_count * 1.1)} words). "
-        f"Do not make it significantly shorter or longer. If the user asked for a long/detailed article, write the full length without cutting it short.\n"
-        f"{caption_note}\n"
-        f"Write only the ready-to-publish body. No extra explanation."
+        f"</context>\n\n"
+        f"<hard_constraints>\n"
+        f"HIGHEST PRIORITY CONSTRAINT: IGNORE any character limits mentioned in the platform rules above. "
+        f"For this request, the ONLY length requirement is the word count.\n\n"
+        f"1. FINAL LENGTH: the ready-to-publish body MUST be approximately {word_count} words. "
+        f"Stay within the range {int(word_count * 0.9)}–{int(word_count * 1.1)} words. "
+        f"Aim for the upper end of that range (around {int(word_count * 1.1)}) to make sure you do not fall short.\n"
+        f"2. Do not cut the article short, skip sections, or stop after an introduction. Write the full depth expected for {word_count} words.\n"
+        f"3. Before finishing, count the words in your response. If it is outside the {int(word_count * 0.9)}–{int(word_count * 1.1)} range, add concrete examples or trim until it fits.\n"
+        f"4. If you finish and the count is below {int(word_count * 0.9)}, expand with real examples, scenarios, or actionable steps instead of filler.\n"
+        f"{caption_note}"
+        f"</hard_constraints>\n\n"
+        f"Write only the ready-to-publish body. No preamble, no explanation, no markdown code fences."
     )
     return system, user
 

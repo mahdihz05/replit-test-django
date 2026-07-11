@@ -719,6 +719,15 @@ export default function AiGenerate() {
             </div>
           </CardHeader>
           <CardContent>
+            {savedContentId && (
+              <div className="mb-4 p-3 bg-primary/10 rounded-lg border border-primary/20 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-primary" />
+                <span className="text-sm text-foreground">محتوای تولیدشده به‌عنوان پیش‌نویس ذخیره شد.</span>
+                <Link href={`/workspaces/${wid}/contents/${savedContentId}`} className="text-sm font-medium text-primary hover:underline mr-auto">
+                  مشاهده پیش‌نویس →
+                </Link>
+              </div>
+            )}
             {loading && (
               <div className="flex items-center justify-center h-48 text-muted-foreground">
                 <div className="text-center space-y-3">
