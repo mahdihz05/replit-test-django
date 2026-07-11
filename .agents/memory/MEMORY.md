@@ -6,3 +6,5 @@
 - [AI form field consistency](ai-form-field-consistency.md) — keep frontend input names aligned with existing backend parameters when extending forms
 - [OpenAI JSON retry validation](openai-json-retry-validation.md) — include JSON parsing and schema validation inside the OpenAI retry loop
 - [Media publishing path handling](media-publishing-lessons.md) — single canonical media path resolver, explicit workspace_id scoping, and Telegram media-group chunking
+- [LLM word-count enforcement](llm-word-count-enforcement.md) — make word count the highest-priority constraint and override platform character limits when they conflict
+- [Replit git push callback](replit-git-push-callback.md) — use gitPush callback instead of shell git push to authenticate with GitHub
