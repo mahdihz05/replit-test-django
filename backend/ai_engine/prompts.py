@@ -78,8 +78,7 @@ def get_platform_rules(platform: str) -> str:
             "- Produce real HTML: <h2> for sections, <h3> for subsections, <p> for paragraphs, "
             "<ul>/<li> for lists. Do NOT use Markdown.\n"
             "- Structure: intro paragraph (no heading) → 2-4 sections with <h2> → conclusion.\n"
-            "- Minimum realistic article length is 600-800 words; preserve the article structure even "
-            "if a shorter word_count was requested.\n"
+            "- Respect the requested word count exactly; do not artificially shorten the article.\n"
             "- No extra introduction, no markdown code fences, just the ready-to-publish HTML."
         )
 
@@ -100,7 +99,8 @@ def build_text_prompt(goal: str, platform: str, tone: str, keywords: str, langua
     """Return (system_prompt, user_prompt) for generate_text."""
     system = (
         "You are an expert Persian content creator for social media and websites. "
-        "You write platform-native content that needs no manual editing before publishing."
+        "You write platform-native content that needs no manual editing before publishing. "
+        "You always respect the requested length and output exactly the amount of content asked for."
     )
     caption_note = ""
     if is_caption and _normalize_platform(platform) in ("telegram", "bale"):
@@ -116,7 +116,9 @@ def build_text_prompt(goal: str, platform: str, tone: str, keywords: str, langua
         f"Tone: {tone}\n"
         f"Keywords: {keywords}\n"
         f"Language: {'Persian' if language == 'fa' else language}\n"
-        f"Approximate word count: {word_count}\n"
+        f"STRICT LENGTH REQUIREMENT: The final output must be approximately {word_count} words. "
+        f"Stay within ±10% of {word_count} words ({int(word_count * 0.9)}–{int(word_count * 1.1)} words). "
+        f"Do not make it significantly shorter or longer. If the user asked for a long/detailed article, write the full length without cutting it short.\n"
         f"{caption_note}\n"
         f"Write only the ready-to-publish body. No extra explanation."
     )

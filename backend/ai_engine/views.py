@@ -86,6 +86,35 @@ def _generate_image_for_batch(batch, source_text, wallet, cost, platform=''):
     return image_item, None
 
 
+def _persist_batch_as_content_draft(batch, workspace_id, user):
+    """Convert the generated text + image into a Content draft so it can be published."""
+    from content.models import Content, ContentVersion
+    text_item = batch.items.filter(item_type__in=['full_text', 'short_text', 'variant']).order_by('order').first()
+    image_item = batch.items.filter(item_type='image').order_by('-created_at').first()
+    if not text_item:
+        return None
+
+    content = Content.objects.create(
+        workspace_id=workspace_id,
+        created_by=user,
+        title=batch.topic[:100] or 'محتوای تولید شده',
+        body=text_item.content,
+        status='draft',
+        language='fa',
+        goal=batch.topic[:300]
+    )
+    ContentVersion.objects.create(
+        content=content,
+        body=text_item.content,
+        version_number=1,
+        source='ai'
+    )
+    if image_item and image_item.image:
+        content.image = image_item.image
+        content.save(update_fields=['image'])
+    return content
+
+
 @api_view(['POST', 'GET'])
 @permission_classes([IsAuthenticated])
 def chat_sessions(request, workspace_id):
@@ -185,14 +214,18 @@ def generate_text(request, workspace_id):
 
     goal = request.data.get('goal', '')
     platform = request.data.get('platform', '')
+    try:
+        word_count = int(request.data.get('word_count', 300))
+    except (ValueError, TypeError):
+        word_count = 300
     result, error, tokens = openai_client.generate_text(
         goal=goal,
         platform=platform,
         tone=request.data.get('tone', 'حرفه‌ای'),
         keywords=request.data.get('keywords', ''),
         language=request.data.get('language', 'fa'),
-        word_count=request.data.get('word_count', 300),
-        is_caption=bool(request.data.get('generate_image'))
+        word_count=word_count,
+        is_caption=False
     )
 
     if error:
@@ -215,7 +248,12 @@ def generate_text(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 
@@ -318,7 +356,12 @@ def rewrite_text(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 
@@ -404,7 +447,12 @@ def suggest_hashtags(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'hashtags': result}})
 
@@ -443,7 +491,12 @@ def generate_summary(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 
@@ -523,7 +576,12 @@ def generate_idea(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'ideas': result, 'tokens': tokens}})
 
@@ -566,7 +624,12 @@ def generate_cta(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'ctas': result}})
 
@@ -668,6 +731,14 @@ def generate_bundle(request, workspace_id):
                 batch.save(update_fields=['image_status'])
             if image_item:
                 items.append(image_item)
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    return Response({'success': True, 'data': {
+                        'batch_id': str(batch.id),
+                        'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data,
+                        'content_id': str(content.id)
+                    }})
 
     return _items_response(batch, items)
 
@@ -742,6 +813,14 @@ def generate_multi_variant(request, workspace_id):
                 batch.save(update_fields=['image_status'])
             if image_item:
                 items.append(image_item)
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    return Response({'success': True, 'data': {
+                        'batch_id': str(batch.id),
+                        'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data,
+                        'content_id': str(content.id)
+                    }})
 
     return _items_response(batch, items)
 

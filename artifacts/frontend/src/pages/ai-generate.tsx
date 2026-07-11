@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Wand2, Copy, Save, Loader2, CheckCheck, Image, RefreshCcw, Wallet } from "lucide-react";
+import { Wand2, Copy, Save, Loader2, CheckCheck, Image, RefreshCcw, Wallet, FileText } from "lucide-react";
+import { Link } from "wouter";
 
 type Tab = "text" | "rewrite" | "summary" | "scenario" | "title" | "hashtag" | "cta" | "idea";
 type Mode = "standard" | "bundle" | "multi_variant";
@@ -94,6 +95,7 @@ export default function AiGenerate() {
   const [variantCount, setVariantCount] = useState("2");
   const [generateImage, setGenerateImage] = useState(false);
   const [includeImage, setIncludeImage] = useState(false);
+  const [savedContentId, setSavedContentId] = useState<string | null>(null);
   const [imageRegenerating, setImageRegenerating] = useState<Record<string, boolean>>({});
   const [imagePreviewOpen, setImagePreviewOpen] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
@@ -139,6 +141,7 @@ export default function AiGenerate() {
   const resetResults = () => {
     setResult("");
     setItems([]);
+    setSavedContentId(null);
   };
 
   const handleModeChange = (newMode: Mode) => {
@@ -199,6 +202,9 @@ export default function AiGenerate() {
       // Also keep the first text item in result for legacy text display
       const textItem = response.data.items.find((i: GeneratedItem) => ["full_text", "variant"].includes(i.item_type));
       setResult(textItem ? textItem.content : "");
+      if (response?.data?.content_id) {
+        setSavedContentId(response.data.content_id);
+      }
     } else {
       if (activeTab === "title") setResult(response?.data?.titles ?? []);
       else if (activeTab === "hashtag") setResult(response?.data?.hashtags ?? []);
@@ -216,6 +222,9 @@ export default function AiGenerate() {
       data: { topic: goal || topic, tone, platform, generate_image: generateImage }
     });
     setItems(response?.data?.items ?? []);
+    if (response?.data?.content_id) {
+      setSavedContentId(response.data.content_id);
+    }
   };
 
   const handleMultiVariantGenerate = async () => {
@@ -259,6 +268,9 @@ export default function AiGenerate() {
       data: payload
     });
     setItems(response?.data?.items ?? []);
+    if (response?.data?.content_id) {
+      setSavedContentId(response.data.content_id);
+    }
   };
 
   const handleGenerate = async () => {
