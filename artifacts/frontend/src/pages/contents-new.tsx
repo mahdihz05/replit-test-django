@@ -54,13 +54,18 @@ export default function ContentNew() {
         payload.append("image", imageFile);
       }
       
-      const data = await apiFetch(`/workspaces/${selectedWorkspace?.id}/contents/`, {
+      const response = await apiFetch(`/workspaces/${selectedWorkspace?.id}/contents/`, {
         method: "POST",
         data: payload
-      }).catch(() => ({ id: "new-id" })); // Fallback
+      });
+      
+      const contentId = response?.data?.id;
+      if (!contentId) {
+        throw new Error("پاسخ سرور نامعتبر است");
+      }
       
       toast({ title: "موفق", description: "محتوا با موفقیت ذخیره شد" });
-      setLocation(`/contents/${data.id}`);
+      setLocation(`/contents/${contentId}`);
     } catch (error: any) {
       toast({ title: "خطا", description: error.message || "خطا در ذخیره محتوا", variant: "destructive" });
     } finally {
@@ -73,18 +78,19 @@ export default function ContentNew() {
     
     setAiLoading(true);
     try {
-      const res = await apiFetch(`/workspaces/${selectedWorkspace?.id}/ai/generate/text/`, {
+      const response = await apiFetch(`/workspaces/${selectedWorkspace?.id}/ai/generate/text/`, {
         method: "POST",
         data: { goal: aiPrompt, language: "fa", word_count: 200 }
-      }).catch(() => ({ text: "این یک متن تولید شده توسط هوش مصنوعی به عنوان نمونه است. هوش مصنوعی می‌تواند به شما در تولید محتوای جذاب و هدفمند برای شبکه‌های اجتماعی کمک کند." }));
+      });
       
-      if (res.text) {
-        setBody(prev => prev ? prev + "\n\n" + res.text : res.text);
+      const generatedText = response?.data?.text;
+      if (generatedText) {
+        setBody(prev => prev ? prev + "\n\n" + generatedText : generatedText);
         if (!title) setTitle(aiPrompt);
         setAiPrompt("");
       }
     } catch (error: any) {
-      toast({ title: "خطا", description: "خطا در ارتباط با هوش مصنوعی", variant: "destructive" });
+      toast({ title: "خطا", description: error.message || "خطا در ارتباط با هوش مصنوعی", variant: "destructive" });
     } finally {
       setAiLoading(false);
     }

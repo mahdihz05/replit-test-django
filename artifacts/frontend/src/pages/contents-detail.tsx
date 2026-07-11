@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ArrowRight, History, Edit, Send, ImageIcon } from "lucide-react";
+import { ArrowRight, History, Send, ImageIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 
@@ -65,11 +65,6 @@ export default function ContentDetail() {
           </p>
         </div>
         <div className="mr-auto flex gap-2">
-          <Link href={`/contents/${content.id}/edit`}>
-            <Button variant="outline" className="gap-2">
-              <Edit className="w-4 h-4" /> ویرایش
-            </Button>
-          </Link>
           <Link href="/publish">
             <Button className="gap-2">
               <Send className="w-4 h-4" /> انتشار

@@ -117,13 +117,18 @@ def _generate_with_pollinations(prompt: str, width: int = 1024, height: int = 10
     return url
 
 
-def generate_image(description, style='', platform=''):
-    """Generate an image. Try DALL-E 3 first; fall back to Pollinations.ai if OpenAI image models are unavailable."""
+def generate_image(description, style='', platform='', enhance=True):
+    """Generate an image. Try DALL-E 3 first; fall back to Pollinations.ai if OpenAI image models are unavailable.
+
+    When enhance=False, the description is assumed to be a fully-formed prompt and is passed
+    through without re-appending platform/style notes. This is used by generate_image_from_text
+    which already produces a refined DALL-E prompt.
+    """
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
         return None, 'کلید API هوش مصنوعی تنظیم نشده است'
 
-    prompt = prompts.build_image_prompt_enhancement(description, platform)
+    prompt = prompts.build_image_prompt_enhancement(description, platform) if enhance else description
     if style:
         prompt += f', style: {style}'
 
@@ -167,11 +172,15 @@ def generate_image_prompt(source_text, max_words=25, platform=''):
 
 
 def generate_image_from_text(source_text, style='', platform=''):
-    """Two-step image generation: create a DALL-E prompt from text, then generate image."""
+    """Two-step image generation: create a DALL-E prompt from text, then generate image.
+
+    The prompt produced by generate_image_prompt already contains platform context and
+    English visual details, so we pass it through without re-enhancing.
+    """
     prompt, error, _ = generate_image_prompt(source_text, platform=platform)
     if error:
         return None, error
-    return generate_image(prompt, style=style, platform=platform)
+    return generate_image(prompt, style=style, platform=platform, enhance=False)
 
 
 def generate_summary(text, length='brief', platform=''):

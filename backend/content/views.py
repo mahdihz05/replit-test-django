@@ -1,3 +1,4 @@
+import mimetypes
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -158,14 +159,19 @@ def publish_content(request, workspace_id, content_id):
         )
         job_objects.append(job)
 
+    if not job_objects:
+        return Response({'success': False, 'error': 'هیچ کانال معتبری انتخاب نشد', 'code': 'NO_VALID_CHANNELS'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
     # If the content has an image, attach it to every job so publishers can send it.
     if content.image:
+        mime_type, _ = mimetypes.guess_type(content.image.name)
         attachment = PublishAttachment.objects.create(
             workspace=content.workspace,
             content=content,
             file_path=content.image.name,
             media_type='image',
-            mime_type='image/png',
+            mime_type=mime_type or 'image/png',
             file_size_bytes=content.image.size,
             original_filename=content.image.name.split('/')[-1]
         )
