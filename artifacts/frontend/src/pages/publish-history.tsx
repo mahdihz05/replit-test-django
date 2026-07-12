@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { apiFetch } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,7 +32,7 @@ interface Job {
   logs: PublishLog[];
 }
 
-const STATUS_MAP: Record<string, { label: string; color: string; icon: JSX.Element }> = {
+const STATUS_MAP: Record<string, { label: string; color: string; icon: ReactNode }> = {
   success: { label: "موفق", color: "bg-green-50 text-green-700 border-green-200", icon: <CheckCircle2 className="w-3 h-3" /> },
   failed: { label: "ناموفق", color: "bg-red-50 text-red-700 border-red-200", icon: <XCircle className="w-3 h-3" /> },
   queued: { label: "در صف", color: "bg-amber-50 text-amber-700 border-amber-200", icon: <Clock className="w-3 h-3" /> },

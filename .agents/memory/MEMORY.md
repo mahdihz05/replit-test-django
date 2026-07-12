@@ -1,10 +1,15 @@
 - [Django workflow path](django-workflow-path.md) — artifact.toml run command must use absolute path for Django manage.py
 - [Django app naming](django-app-naming.md) — channels app renamed to channels_app to avoid Django Channels conflict
 - [Channel verification reactivation](channel-verification-reactivation.md) — re-verifying a previously deleted channel must reactivate the soft-deleted record
-- [Telegram polling latency](telegram-polling-latency.md) — high Replit→Telegram latency makes short-polling unreliable; use long-polling
+- [Telegram polling latency](telegram-polling-latency.md) — high Replit→Telegram latency and restart conflicts make webhook the reliable choice
+- [Telegram bot startup](telegram-bot-startup.md) — the `bots` app must be registered and its `start_bot()` called from `ready()` for verification to work
+- [Telegram channel posts](telegram-channel-posts.md) — Telegram sends channel messages as `channel_post`, not `message`; handlers must inspect both
+- [Django CSRF settings](django-csrf-settings.md) — set CSRF_TRUSTED_ORIGINS for the admin panel and keep cookie flags matched to the deployment scheme
 - [Dashboard publish trends](dashboard-publish-trends.md) — count successful publishes by completion date, not creation date
 - [AI form field consistency](ai-form-field-consistency.md) — keep frontend input names aligned with existing backend parameters when extending forms
 - [OpenAI JSON retry validation](openai-json-retry-validation.md) — include JSON parsing and schema validation inside the OpenAI retry loop
 - [Media publishing path handling](media-publishing-lessons.md) — single canonical media path resolver, explicit workspace_id scoping, and Telegram media-group chunking
 - [LLM word-count enforcement](llm-word-count-enforcement.md) — make word count the highest-priority constraint and override platform character limits when they conflict
 - [Replit git push callback](replit-git-push-callback.md) — use gitPush callback instead of shell git push to authenticate with GitHub
+- [AI image draft persistence](ai-image-draft-persistence.md) — generated images must be persisted as a Content draft with content_id so the frontend can reuse the image on save/publish
+- [Telegram media without caption](telegram-no-caption-split.md) — send Telegram media with no caption and follow with a separate text message to avoid caption length limits

@@ -58,11 +58,13 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
-packages = ["cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "openssl", "pkg-config", "rustc", "tcl", "tk", "zlib"]
+packages = ["cargo", "freetype", "lcms2", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "openssl", "pkg-config", "rustc", "tcl", "tk", "zlib", "nano"]
 
 [userenv]
 
 [userenv.shared]
 DEBUG = "true"
+TELEGRAM_BOT_TOKEN = ""
+OPENAI_API_KEY = ""
 # Secrets are managed via Replit Secrets (OPENAI_API_KEY, TELEGRAM_BOT_TOKEN)
 # Do not put credentials here; this file is committed to git.

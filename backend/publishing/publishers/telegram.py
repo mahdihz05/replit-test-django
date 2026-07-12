@@ -33,15 +33,6 @@ def send_message(token, chat_id, text):
     })
 
 
-def send_photo(token, chat_id, text, photo_url):
-    return _call(token, 'sendPhoto', {
-        'chat_id': chat_id,
-        'photo': photo_url,
-        'caption': text,
-        'parse_mode': 'HTML'
-    })
-
-
 def delete_message(token, chat_id, message_id):
     result, _ = _call(token, 'deleteMessage', {
         'chat_id': chat_id,
@@ -64,7 +55,21 @@ def _resolve_media_path(file_path):
     return f"{settings.MEDIA_ROOT.rstrip('/')}/{file_path.lstrip('/')}"
 
 
-def _send_media_group(token, chat_id, attachments, caption):
+def _classify_error(err):
+    error_lower = err.lower()
+    if 'forbidden' in error_lower or 'not enough rights' in error_lower:
+        if 'kicked' in error_lower or 'removed' in error_lower:
+            return 'bot_removed'
+        return 'auth_error'
+    if 'retry' in error_lower or 'flood' in error_lower:
+        return 'rate_limit'
+    if 'network' in error_lower or 'connection' in error_lower:
+        return 'connection_error'
+    return 'unknown'
+
+
+def _send_media_group(token, chat_id, attachments):
+    """Send a group of image/video attachments without any caption."""
     media = []
     files = {}
     for i, att in enumerate(attachments):
@@ -77,11 +82,7 @@ def _send_media_group(token, chat_id, attachments, caption):
         except Exception as e:
             return None, f'خطا در خواندن فایل: {e}'
         tg_type = 'photo' if media_type == 'image' else 'video' if media_type == 'video' else 'document'
-        item = {'type': tg_type, 'media': f'attach://file_{i}'}
-        if i == 0 and caption:
-            item['caption'] = caption
-            item['parse_mode'] = 'HTML'
-        media.append(item)
+        media.append({'type': tg_type, 'media': f'attach://file_{i}'})
 
     url = TELEGRAM_API.format(token=token, method='sendMediaGroup')
     try:
@@ -105,7 +106,8 @@ def _send_media_group(token, chat_id, attachments, caption):
                 pass
 
 
-def _send_single_media(token, chat_id, text, attachment):
+def _send_single_media(token, chat_id, attachment):
+    """Send a single media file without a caption."""
     media_type = attachment.get('media_type')
     full_path = _resolve_media_path(attachment.get('file_path', ''))
     if not full_path:
@@ -125,12 +127,11 @@ def _send_single_media(token, chat_id, text, attachment):
     method = method_map.get(media_type, 'sendDocument')
     file_field = 'photo' if media_type == 'image' else media_type
 
-    import requests
     url = TELEGRAM_API.format(token=token, method=method)
     try:
         resp = requests.post(
             url,
-            data={'chat_id': chat_id, 'caption': text, 'parse_mode': 'HTML'},
+            data={'chat_id': chat_id, 'parse_mode': 'HTML'},
             files={file_field: (attachment.get('original_filename', 'file'), file_data, attachment.get('mime_type', 'application/octet-stream'))},
             timeout=60,
         )
@@ -142,71 +143,60 @@ def _send_single_media(token, chat_id, text, attachment):
         return None, str(e)
 
 
+def _send_all_media(token, chat_id, attachments):
+    """Send every attachment as media, with no caption. Returns (ok, error_type, first_message_id)."""
+    if all(a.get('media_type') in ('image', 'video') for a in attachments):
+        first_message_id = None
+        for i, chunk in enumerate([attachments[i:i + 10] for i in range(0, len(attachments), 10)]):
+            result, err = _send_media_group(token, chat_id, chunk)
+            if err:
+                return False, _classify_error(err), err
+            if i == 0 and isinstance(result, list) and result:
+                first_message_id = result[0].get('message_id')
+        return True, None, first_message_id
+
+    first_message_id = None
+    for att in attachments:
+        result, err = _send_single_media(token, chat_id, att)
+        if err:
+            return False, _classify_error(err), err
+        if first_message_id is None and isinstance(result, dict):
+            first_message_id = result.get('message_id')
+    return True, None, first_message_id
+
+
+def _send_text(token, chat_id, text):
+    """Send a standalone text message. Returns (ok, error_type, message_id_or_error)."""
+    result, err = send_message(token, chat_id, text)
+    if err:
+        return False, _classify_error(err), err
+    return True, None, result.get('message_id') if isinstance(result, dict) else None
+
+
 def publish(channel, content, attachments=None):
     from django.conf import settings
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = channel.external_id
 
-    text = content.body if content.body else ''
+    text = content.body or ''
     if content.title and content.title != 'untitled':
         text = f'<b>{content.title}</b>\n\n{text}'
 
     attachments = attachments or []
 
     if not attachments:
-        result, err = send_message(token, chat_id, text)
-        if err:
-            error_lower = err.lower()
-            if 'forbidden' in error_lower or 'not enough rights' in error_lower:
-                if 'kicked' in error_lower or 'removed' in error_lower:
-                    return False, 'bot_removed', err
-                return False, 'auth_error', err
-            if 'retry' in error_lower or 'flood' in error_lower:
-                return False, 'rate_limit', err
-            if 'network' in error_lower or 'connection' in error_lower:
-                return False, 'connection_error', err
-            return False, 'unknown', err
-        message_id = result.get('message_id') if isinstance(result, dict) else None
-        return True, None, message_id
+        return _send_text(token, chat_id, text)
 
-    # All image/video attachments: send in media groups of up to 10 items
-    if all(a.get('media_type') in ('image', 'video') for a in attachments):
-        first_group = True
-        for chunk in [attachments[i:i + 10] for i in range(0, len(attachments), 10)]:
-            chunk_caption = text if first_group else ''
-            result, err = _send_media_group(token, chat_id, chunk, chunk_caption)
-            if err:
-                error_lower = err.lower()
-                if 'forbidden' in error_lower or 'not enough rights' in error_lower:
-                    if 'kicked' in error_lower or 'removed' in error_lower:
-                        return False, 'bot_removed', err
-                    return False, 'auth_error', err
-                if 'retry' in error_lower or 'flood' in error_lower:
-                    return False, 'rate_limit', err
-                if 'network' in error_lower or 'connection' in error_lower:
-                    return False, 'connection_error', err
-                return False, 'unknown', err
-            first_group = False
-        return True, None, None
+    # Publish media first with NO caption, then the text as a separate message.
+    # This avoids Telegram's caption length limits and keeps the post readable.
+    media_ok, media_error_type, media_msg_id = _send_all_media(token, chat_id, attachments)
+    if not media_ok:
+        return False, media_error_type, media_msg_id
 
-    # Mixed or single media: send text first, then individual media
     if text:
-        msg_result, msg_err = send_message(token, chat_id, text)
-        if msg_err:
-            error_lower = msg_err.lower()
-            if 'forbidden' in error_lower or 'not enough rights' in error_lower:
-                if 'kicked' in error_lower or 'removed' in error_lower:
-                    return False, 'bot_removed', msg_err
-                return False, 'auth_error', msg_err
-            if 'retry' in error_lower or 'flood' in error_lower:
-                return False, 'rate_limit', msg_err
-            if 'network' in error_lower or 'connection' in error_lower:
-                return False, 'connection_error', msg_err
-            return False, 'unknown', msg_err
+        text_ok, text_error_type, text_msg_id = _send_text(token, chat_id, text)
+        if not text_ok:
+            return False, text_error_type, text_msg_id
+        return True, None, media_msg_id or text_msg_id
 
-    for att in attachments:
-        result, err = _send_single_media(token, chat_id, '', att)
-        if err:
-            return False, 'unknown', err
-
-    return True, None, None
+    return True, None, media_msg_id

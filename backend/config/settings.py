@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'publishing',
     'wallet',
     'reports',
+    'bots',
 ]
 
 MIDDLEWARE = [
@@ -131,6 +132,22 @@ else:
     # Dev fallback: allow all origins but disable credentials to avoid CSRF risk
     CORS_ALLOW_ALL_ORIGINS = True
     CORS_ALLOW_CREDENTIALS = False
+
+# CSRF configuration for Django admin panel and any session-based views.
+# In production set CSRF_TRUSTED_ORIGINS to your actual HTTPS origin(s).
+_replit_domain = os.environ.get('REPLIT_DEV_DOMAIN', '')
+_csrf_origins = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
+if _csrf_origins:
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(',') if o.strip()]
+elif _replit_domain:
+    CSRF_TRUSTED_ORIGINS = [f'https://{_replit_domain}']
+else:
+    CSRF_TRUSTED_ORIGINS = []
+
+CSRF_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_HTTPONLY = False
+CSRF_USE_SESSIONS = False
 
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')

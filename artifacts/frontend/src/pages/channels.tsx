@@ -126,6 +126,10 @@ export default function Channels() {
   const [wpSiteUrl, setWpSiteUrl] = useState("");
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(false);
+  const [botStatus, setBotStatus] = useState<{ loading: boolean; ok?: boolean; bot?: any; error?: string } | null>(null);
+  const [manualChatId, setManualChatId] = useState("");
+  const [manualUsername, setManualUsername] = useState("");
+  const [manualVerifying, setManualVerifying] = useState(false);
 
   const fetchChannels = async () => {
     if (!selectedWorkspace) return;
@@ -197,6 +201,12 @@ export default function Channels() {
 
   useEffect(() => () => stopPolling(), []);
 
+  useEffect(() => {
+    if (step === 3 && platform === "telegram" && verification) {
+      checkBotStatus();
+    }
+  }, [step, platform, verification]);
+
   const closeModal = () => {
     stopPolling();
     if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
@@ -211,6 +221,10 @@ export default function Channels() {
     setWpSiteUrl("");
     setOauthUrl(null);
     setCheckingConnection(false);
+    setBotStatus(null);
+    setManualChatId("");
+    setManualUsername("");
+    setManualVerifying(false);
   };
 
   const handleStartVerification = async () => {
@@ -306,6 +320,54 @@ export default function Channels() {
       toast({ title: "خطا", description: e.message || "بررسی اتصال ناموفق بود", variant: "destructive" });
     } finally {
       setCheckingConnection(false);
+    }
+  };
+
+  const checkBotStatus = async () => {
+    if (!selectedWorkspace || platform !== "telegram") return;
+    setBotStatus({ loading: true });
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/telegram-bot-status/`);
+      if (res?.success && res?.data?.bot) {
+        setBotStatus({ loading: false, ok: true, bot: res.data.bot });
+      } else {
+        setBotStatus({ loading: false, ok: false, error: res?.error || "وضعیت ربات نامشخص است" });
+      }
+    } catch (e: any) {
+      setBotStatus({ loading: false, ok: false, error: e.message || "خطا در بررسی وضعیت ربات" });
+    }
+  };
+
+  const handleManualVerify = async () => {
+    if (!selectedWorkspace || !verification) return;
+    if (!manualChatId.trim() && !manualUsername.trim()) {
+      toast({ title: "ورودی خالی", description: "chat_id یا username کانال را وارد کنید", variant: "destructive" });
+      return;
+    }
+    setManualVerifying(true);
+    try {
+      const res = await apiFetch(
+        `/workspaces/${selectedWorkspace.id}/channels/verify/${verification.token}/confirm/`,
+        {
+          method: "POST",
+          data: {
+            chat_id: manualChatId.trim(),
+            username: manualUsername.trim(),
+          },
+        }
+      );
+      if (res?.success) {
+        toast({ title: "✅ تأیید شد", description: res?.data?.message || "کانال تأیید شد" });
+        stopPolling();
+        setStep(4);
+        fetchChannels();
+      } else {
+        throw new Error(res?.error || "تأیید دستی ناموفق بود");
+      }
+    } catch (e: any) {
+      toast({ title: "خطا در تأیید دستی", description: e.message || "خطا", variant: "destructive" });
+    } finally {
+      setManualVerifying(false);
     }
   };
 
@@ -704,9 +766,67 @@ export default function Channels() {
                 </div>
               )}
 
+              {platform === "telegram" && botStatus && (
+                <div
+                  className={`rounded-lg border p-3 text-sm ${
+                    botStatus.ok
+                      ? "border-green-200 bg-green-50 text-green-800"
+                      : botStatus.loading
+                        ? "border-muted bg-muted text-muted-foreground"
+                        : "border-red-200 bg-red-50 text-red-800"
+                  }`}
+                >
+                  {botStatus.loading ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      در حال بررسی وضعیت ربات...
+                    </span>
+                  ) : botStatus.ok ? (
+                    <span>ربات فعال: @{botStatus.bot?.username}</span>
+                  ) : (
+                    <span>مشکل در ربات تلگرام: {botStatus.error}</span>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                در انتظار تأیید...
+                در انتظار تأیید خودکار...
+              </div>
+
+              <Button onClick={checkForConnection} disabled={checkingConnection} className="w-full gap-2">
+                {checkingConnection ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                بررسی وضعیت کانال
+              </Button>
+
+              <div className="rounded-lg border border-dashed p-3 space-y-3">
+                <p className="text-sm font-medium">تأیید دستی</p>
+                <p className="text-xs text-muted-foreground">
+                  اگر تأیید خودکار انجام نشد، شناسه یا نام کاربری کانال را وارد کنید.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input
+                    placeholder="chat_id"
+                    value={manualChatId}
+                    onChange={e => setManualChatId(e.target.value)}
+                    className="dir-ltr"
+                  />
+                  <Input
+                    placeholder="@username"
+                    value={manualUsername}
+                    onChange={e => setManualUsername(e.target.value)}
+                    className="dir-ltr"
+                  />
+                </div>
+                <Button
+                  onClick={handleManualVerify}
+                  disabled={manualVerifying || (!manualChatId.trim() && !manualUsername.trim())}
+                  variant="outline"
+                  className="w-full gap-2"
+                >
+                  {manualVerifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  تأیید دستی کانال
+                </Button>
               </div>
 
               {verification.status === "expired" && (

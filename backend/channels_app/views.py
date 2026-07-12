@@ -185,6 +185,89 @@ def verify_retry(request, workspace_id, token):
     return Response({'success': True, 'data': data})
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def verify_manual(request, workspace_id, token):
+    """Manually verify a channel using a known chat_id or username.
+
+    Useful when the bot cannot reach the chat (e.g. webhook not set) or the
+    user wants to force-confirm a previously sent token.
+    """
+    member = get_member(request.user, workspace_id)
+    if not member or member.role != 'admin':
+        return Response({'success': False, 'error': 'فقط ادمین می‌تواند کانال تأیید کند', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        verification = ChannelVerification.objects.get(token=token, workspace_id=workspace_id)
+    except ChannelVerification.DoesNotExist:
+        return Response({'success': False, 'error': 'توکن یافت نشد', 'code': 'NOT_FOUND'},
+                        status=status.HTTP_404_NOT_FOUND)
+
+    if verification.status == 'verified':
+        return Response({'success': True, 'data': {'message': 'کانال قبلاً تأیید شده است'}})
+
+    if not verification.is_valid():
+        return Response({'success': False, 'error': 'کد منقضی شده است. لطفاً کد جدید دریافت کنید.', 'code': 'EXPIRED'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    chat_id = (request.data.get('chat_id') or '').strip()
+    username = (request.data.get('username') or '').strip().lstrip('@')
+    if not chat_id and not username:
+        return Response({'success': False, 'error': 'chat_id یا username کانال الزامی است', 'code': 'MISSING_CHAT'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    lookup = chat_id or f'@{username}'
+
+    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+    if not bot_token:
+        return Response({'success': False, 'error': 'توکن ربات تلگرام تنظیم نشده است', 'code': 'NOT_CONFIGURED'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    from publishing.publishers.telegram import get_chat
+    chat = get_chat(bot_token, lookup)
+    if not chat:
+        return Response({'success': False, 'error': 'ربات به این کانال/گروه دسترسی ندارد', 'code': 'CHAT_NOT_FOUND'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    from bots.telegram_bot import handle_verification_token
+    reply = handle_verification_token(
+        token=token,
+        chat_id=chat['id'],
+        chat_title=chat.get('title', verification.name),
+        chat_type=chat.get('type', verification.channel_type),
+        chat_username=chat.get('username', ''),
+    )
+    if not reply:
+        return Response({'success': False, 'error': 'تأیید کانال ناموفق بود', 'code': 'VERIFY_FAILED'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    return Response({'success': True, 'data': {'message': reply}})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def telegram_bot_status(request, workspace_id):
+    """Return the configured Telegram bot identity and whether the token is valid."""
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    bot_token = getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
+    if not bot_token:
+        return Response({'success': False, 'error': 'توکن ربات تلگرام تنظیم نشده است', 'code': 'NOT_CONFIGURED'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    from publishing.publishers.telegram import _call
+    result, err = _call(bot_token, 'getMe', {})
+    if err:
+        return Response({'success': False, 'error': err, 'code': 'BOT_ERROR'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+
+    return Response({'success': True, 'data': {'bot': result}})
+
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def channel_detail(request, workspace_id, channel_id):

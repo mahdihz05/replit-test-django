@@ -404,7 +404,12 @@ def suggest_titles(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'titles': result}})
 
@@ -536,7 +541,12 @@ def generate_scenario(request, workspace_id):
             items = [item]
             if image_item:
                 items.append(image_item)
-            return Response({'success': True, 'data': {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}})
+            response_data = {'items': GeneratedItemSerializer(items, many=True, context={'request': request}).data}
+            if image_item:
+                content = _persist_batch_as_content_draft(batch, workspace_id, request.user)
+                if content:
+                    response_data['content_id'] = str(content.id)
+            return Response({'success': True, 'data': response_data})
 
     return Response({'success': True, 'data': {'text': result, 'tokens': tokens}})
 

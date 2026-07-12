@@ -9,8 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Wand2, Copy, Save, Loader2, CheckCheck, Image, RefreshCcw, Wallet, FileText } from "lucide-react";
+import { Wand2, Copy, Save, Loader2, CheckCheck, Image, RefreshCcw, Wallet, FileText, Send } from "lucide-react";
 import { Link } from "wouter";
+import PublishDialog from "@/components/PublishDialog";
 
 type Tab = "text" | "rewrite" | "summary" | "scenario" | "title" | "hashtag" | "cta" | "idea";
 type Mode = "standard" | "bundle" | "multi_variant";
@@ -99,6 +100,7 @@ export default function AiGenerate() {
   const [imageRegenerating, setImageRegenerating] = useState<Record<string, boolean>>({});
   const [imagePreviewOpen, setImagePreviewOpen] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [publishOpen, setPublishOpen] = useState(false);
 
   const wid = selectedWorkspace?.id;
 
@@ -333,12 +335,22 @@ export default function AiGenerate() {
   const handleSaveStandard = async () => {
     if (!result || !wid) return;
     const body = Array.isArray(result) ? result.join("\n") : result;
+    const title = (goal || topic || niche || "محتوای تولید شده").slice(0, 100);
     try {
-      await apiFetch(`/workspaces/${wid}/contents/`, {
-        method: "POST",
-        data: { title: (goal || topic || niche || "محتوای تولید شده").slice(0, 100), body, status: "draft" }
-      });
-      toast({ title: "ذخیره شد", description: "محتوا در پیش‌نویس‌ها ذخیره شد" });
+      if (savedContentId) {
+        // Backend already created a draft (possibly with image). Update its text instead of duplicating.
+        await apiFetch(`/workspaces/${wid}/contents/${savedContentId}/`, {
+          method: "PATCH",
+          data: { title, body }
+        });
+        toast({ title: "به‌روزرسانی شد", description: "پیش‌نویس با متن فعلی به‌روزرسانی شد" });
+      } else {
+        await apiFetch(`/workspaces/${wid}/contents/`, {
+          method: "POST",
+          data: { title, body, status: "draft" }
+        });
+        toast({ title: "ذخیره شد", description: "محتوا در پیش‌نویس‌ها ذخیره شد" });
+      }
     } catch (error: any) {
       toast({ title: "خطا", description: error.message || "خطا در ذخیره", variant: "destructive" });
     }
@@ -704,15 +716,25 @@ export default function AiGenerate() {
                     <Label htmlFor="includeImage" className="text-xs font-normal">هنگام ذخیره، تصویر هم ضمیمه شود</Label>
                   </div>
                 )}
+                {(mode === "bundle" || mode === "multi_variant") && savedContentId && (
+                  <Button size="sm" className="gap-1.5 h-8" onClick={() => setPublishOpen(true)}>
+                    <Send className="w-3.5 h-3.5" /> انتشار
+                  </Button>
+                )}
                 {mode === "standard" && result && (
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleCopy(resultText, "standard")}>
                       {copied["standard"] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                       {copied["standard"] ? "کپی شد" : "کپی"}
                     </Button>
-                    <Button size="sm" className="gap-1.5 h-8" onClick={handleSaveStandard}>
-                      <Save className="w-3.5 h-3.5" /> ذخیره
+                    <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={handleSaveStandard}>
+                      <Save className="w-3.5 h-3.5" /> {savedContentId ? "به‌روزرسانی" : "ذخیره"}
                     </Button>
+                    {savedContentId && (
+                      <Button size="sm" className="gap-1.5 h-8" onClick={() => setPublishOpen(true)}>
+                        <Send className="w-3.5 h-3.5" /> انتشار
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -837,6 +859,13 @@ export default function AiGenerate() {
           </CardContent>
         </Card>
       </div>
+
+      <PublishDialog
+        workspaceId={wid || ""}
+        contentId={savedContentId}
+        open={publishOpen}
+        onOpenChange={setPublishOpen}
+      />
     </div>
   );
 }

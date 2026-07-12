@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ckwciaw2G9DUNPIxGtRMr"
+uri = "file://screenshots/ai-generate-final.png"
+type = "image"
+title = "AI Generate page with Publish button"
