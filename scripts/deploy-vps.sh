@@ -49,6 +49,7 @@ sudo systemctl restart "$SERVICE_NAME"
 sudo systemctl reload nginx
 
 curl --fail --silent --show-error \
+  --retry 8 --retry-delay 2 --retry-all-errors --retry-connrefused \
   "https://$DOMAIN/api/auth/linkedin/callback/?error=access_denied&error_description=deployment-check" \
   >/dev/null
 
