@@ -404,7 +404,7 @@ def build_chat_system_prompt() -> str:
 # ---------------------------------------------------------------------------
 
 def build_image_prompt_from_text(source_text: str, platform: str, max_words: int = 25) -> str:
-    """Build an English DALL-E prompt from Persian source text, platform-aware."""
+    """Build an English GPT Image prompt from Persian source text, platform-aware."""
     p = _normalize_platform(platform)
 
     platform_visual_notes = {

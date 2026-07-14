@@ -64,7 +64,7 @@ def _create_batch_and_text_item(workspace_id, user, mode, capability, request_da
 
 
 def _generate_image_for_batch(batch, source_text, wallet, cost, platform=''):
-    """Generate a DALL-E image from source text and attach it to the batch as a GeneratedItem."""
+    """Generate a GPT Image asset from source text and attach it to the batch."""
     batch.image_status = 'pending'
     batch.save(update_fields=['image_status'])
     image_path, error = openai_client.generate_image_from_text(source_text, platform=platform)
@@ -277,7 +277,7 @@ def generate_image_view(request, workspace_id):
     platform = request.data.get('platform', '')
     style = request.data.get('style', '')
 
-    # Convert the user's description into a vivid, platform-aware DALL-E prompt.
+    # Convert the user's description into a vivid, platform-aware GPT Image prompt.
     # This handles Persian input and produces a high-quality English prompt.
     result, error = openai_client.generate_image_from_text(
         source_text=description,

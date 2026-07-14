@@ -64,7 +64,7 @@ class ImageGenerationTests(TestCase):
         self.assertTrue(call['prompt'].startswith('a test image'))
         self.assertEqual(call['size'], '1024x1024')
         self.assertEqual(call['quality'], 'medium')
-        self.assertEqual(call['response_format'], 'b64_json')
+        self.assertNotIn('response_format', call)
         self.assertEqual(call['output_format'], 'png')
         self.assertEqual(call['n'], 1)
         save_image.assert_called_once_with('aW1hZ2U=')

@@ -131,7 +131,7 @@ def _generate_with_pollinations(prompt: str, width: int = 1024, height: int = 10
 
 
 def generate_image(description, style='', platform='', enhance=True):
-    """Generate an image with the configured OpenAI model, then use the existing fallback.
+    """Generate an image with the configured GPT Image model, then use the existing fallback.
 
     When enhance=False, the description is assumed to be a fully-formed prompt and is passed
     through without re-appending platform/style notes. This is used by generate_image_from_text
@@ -155,7 +155,6 @@ def generate_image(description, style='', platform='', enhance=True):
             prompt=prompt,
             size=image_defaults['size'],
             quality=image_defaults['quality'],
-            response_format='b64_json',
             output_format='png',
             n=1,
         )
