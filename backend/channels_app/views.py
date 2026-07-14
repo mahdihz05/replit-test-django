@@ -3,18 +3,25 @@ import string
 import requests
 import logging
 import json
+import hashlib
+import secrets
 from datetime import timedelta
-from urllib.parse import urlencode, urljoin
+from urllib.parse import urlencode, urljoin, urlparse
 from django.utils import timezone
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from workspaces.models import WorkspaceMember
-from .models import PublishChannel, ChannelVerification, LinkedInConnection, WordPressConnection
+from .models import (
+    PublishChannel, ChannelVerification, LinkedInConnection, LinkedInOAuthState,
+    WordPressConnection,
+)
 from .serializers import (
     PublishChannelSerializer, ChannelVerificationSerializer,
     LinkedInConnectionSerializer, WordPressConnectionSerializer,
@@ -24,6 +31,18 @@ from .validators import is_safe_url, normalize_site_url
 from publishing.publishers import wordpress as wp_publisher
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_frontend_origin(value, request=None):
+    """Return an allow-listed HTTP(S) origin suitable for postMessage."""
+    candidates = set(getattr(settings, 'CORS_ALLOWED_ORIGINS', []))
+    if request:
+        request_origin = request.headers.get('Origin', '')
+        if request_origin:
+            candidates.add(request_origin)
+    parsed = urlparse(value or '')
+    normalized = f'{parsed.scheme}://{parsed.netloc}' if parsed.scheme in ('http', 'https') and parsed.netloc else ''
+    return normalized if normalized in candidates else ''
 
 
 def get_member(user, workspace_id):
@@ -45,17 +64,19 @@ def _oauth_callback_html(success, message, platform, origin='*', payload=None):
         'platform': platform,
         'payload': payload or {},
     }, ensure_ascii=False)
+    target_origin = origin if origin and origin != '*' else 'null'
+    target_json = json.dumps(target_origin)
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{platform} OAuth</title></head>
 <body><p>در حال بستن پنجره...</p>
 <script>
 try {{
-  window.opener.postMessage({data}, '{origin}');
+  if (window.opener && {target_json} !== 'null') window.opener.postMessage({data}, {target_json});
 }} catch (e) {{}}
 window.close();
 </script>
 </body></html>"""
-    return Response(html, content_type='text/html; charset=utf-8')
+    return HttpResponse(html, content_type='text/html; charset=utf-8')
 
 
 # ─────────────────────────────────────────────
@@ -185,6 +206,40 @@ def verify_retry(request, workspace_id, token):
     return Response({'success': True, 'data': data})
 
 
+def _validate_telegram_chat(bot_token, lookup, expected_type):
+    """Resolve a chat and prove that this bot can publish to it."""
+    from publishing.publishers.telegram import _call
+
+    chat, error = _call(bot_token, 'getChat', {'chat_id': lookup})
+    if error or not chat:
+        return None, 'ربات به این کانال یا گروه دسترسی ندارد.', 'CHAT_NOT_FOUND'
+
+    actual_type = chat.get('type', '')
+    allowed_types = {'channel'} if expected_type == 'channel' else {'group', 'supergroup'}
+    if actual_type not in allowed_types:
+        expected_label = 'کانال' if expected_type == 'channel' else 'گروه'
+        return None, f'شناسه واردشده مربوط به {expected_label} نیست.', 'CHAT_TYPE_MISMATCH'
+
+    bot, error = _call(bot_token, 'getMe', {})
+    if error or not bot:
+        return None, 'امکان بررسی هویت ربات تلگرام وجود ندارد.', 'BOT_ERROR'
+
+    membership, error = _call(bot_token, 'getChatMember', {
+        'chat_id': chat['id'],
+        'user_id': bot['id'],
+    })
+    if error or not membership:
+        return None, 'عضویت ربات در کانال قابل بررسی نیست.', 'MEMBERSHIP_CHECK_FAILED'
+
+    if membership.get('status') not in ('administrator', 'creator'):
+        return None, 'ابتدا ربات را به‌عنوان ادمین کانال یا گروه اضافه کنید.', 'BOT_NOT_ADMIN'
+
+    if actual_type == 'channel' and not membership.get('can_post_messages', False):
+        return None, 'ربات مجوز ارسال پیام در کانال را ندارد.', 'BOT_CANNOT_POST'
+
+    return chat, None, None
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def verify_manual(request, workspace_id, token):
@@ -211,7 +266,14 @@ def verify_manual(request, workspace_id, token):
         return Response({'success': False, 'error': 'کد منقضی شده است. لطفاً کد جدید دریافت کنید.', 'code': 'EXPIRED'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    chat_id = (request.data.get('chat_id') or '').strip()
+    if verification.platform != 'telegram':
+        return Response({
+            'success': False,
+            'error': 'این روش تأیید فقط برای تلگرام قابل استفاده است',
+            'code': 'INVALID_PLATFORM',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    chat_id = str(request.data.get('chat_id') or '').strip()
     username = (request.data.get('username') or '').strip().lstrip('@')
     if not chat_id and not username:
         return Response({'success': False, 'error': 'chat_id یا username کانال الزامی است', 'code': 'MISSING_CHAT'},
@@ -224,8 +286,17 @@ def verify_manual(request, workspace_id, token):
         return Response({'success': False, 'error': 'توکن ربات تلگرام تنظیم نشده است', 'code': 'NOT_CONFIGURED'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-    from publishing.publishers.telegram import get_chat
-    chat = get_chat(bot_token, lookup)
+    chat, validation_error, validation_code = _validate_telegram_chat(
+        bot_token,
+        lookup,
+        verification.channel_type,
+    )
+    if validation_error:
+        return Response({
+            'success': False,
+            'error': validation_error,
+            'code': validation_code,
+        }, status=status.HTTP_400_BAD_REQUEST)
     if not chat:
         return Response({'success': False, 'error': 'ربات به این کانال/گروه دسترسی ندارد', 'code': 'CHAT_NOT_FOUND'},
                         status=status.HTTP_400_BAD_REQUEST)
@@ -287,7 +358,8 @@ def channel_detail(request, workspace_id, channel_id):
         conn_id = (channel.extra_data or {}).get('connection_id')
         if conn_id:
             LinkedInConnection.objects.filter(id=conn_id, workspace_id=workspace_id).update(
-                is_active=False, status='disconnected'
+                is_active=False, status='disconnected', access_token='', refresh_token='',
+                disconnected_at=timezone.now(),
             )
     elif channel.platform == 'wordpress':
         conn_id = (channel.extra_data or {}).get('connection_id')
@@ -295,6 +367,12 @@ def channel_detail(request, workspace_id, channel_id):
             WordPressConnection.objects.filter(id=conn_id, workspace_id=workspace_id).update(
                 is_active=False, status='disconnected'
             )
+
+    if channel.platform == 'linkedin':
+        from publishing.models import PublishJob
+        PublishJob.objects.filter(channel=channel, status='queued').update(
+            status='failed', completed_at=timezone.now(), next_retry_at=None,
+        )
 
     channel.is_active = False
     channel.save()
@@ -348,7 +426,11 @@ def _linkedin_redirect_uri():
     explicit = getattr(settings, 'LINKEDIN_REDIRECT_URI', '')
     if explicit:
         return explicit
-    return 'https://localhost/api/workspaces/linkedin/callback/'
+    return 'https://localhost/api/auth/linkedin/callback/'
+
+
+def _state_digest(value):
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
 
 @api_view(['POST'])
@@ -365,23 +447,33 @@ def linkedin_connect_start(request, workspace_id):
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     target = request.data.get('platform_target', 'personal')
-    if target == 'organization' and not getattr(settings, 'LINKEDIN_ORG_ENABLED', False):
-        return Response({'success': False, 'error': 'انتشار روی صفحه سازمانی LinkedIn فعلاً غیرفعال است.',
-                         'code': 'ORG_DISABLED'},
+    if target not in dict(LinkedInConnection.TARGET_CHOICES):
+        return Response({'success': False, 'error': 'هدف انتشار معتبر نیست', 'code': 'INVALID_TARGET'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if target == 'organization':
+        return Response({'success': False, 'error': 'انتشار سازمانی پس از دریافت تأیید Community Management API و پیاده‌سازی انتخاب صفحه فعال می‌شود.',
+                         'code': 'ORG_REQUIRES_APPROVAL'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    origin = request.data.get('origin', request.headers.get('Origin', '*'))
-    state = sign_state({
-        'workspace_id': str(workspace_id),
-        'user_id': str(request.user.id),
-        'platform_target': target,
-        'origin': origin,
-    })
+    origin = _safe_frontend_origin(request.data.get('origin'), request)
+    if not origin:
+        return Response({'success': False, 'error': 'مبدأ رابط اتصال معتبر نیست', 'code': 'INVALID_ORIGIN'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
-    scope = 'openid profile w_member_social'
-    if target == 'organization':
-        scope += ' w_organization_social'
+    if not request.session.session_key:
+        request.session.create()
+    state = secrets.token_urlsafe(48)
+    LinkedInOAuthState.objects.create(
+        user=request.user,
+        workspace_id=workspace_id,
+        state_hash=_state_digest(state),
+        session_key=request.session.session_key or '',
+        platform_target=target,
+        frontend_origin=origin,
+        expires_at=timezone.now() + timedelta(minutes=10),
+    )
 
+    scope = 'openid profile email w_member_social'
     redirect_uri = _linkedin_redirect_uri()
     params = {
         'response_type': 'code',
@@ -391,7 +483,7 @@ def linkedin_connect_start(request, workspace_id):
         'scope': scope,
     }
     auth_url = f'https://www.linkedin.com/oauth/v2/authorization?{urlencode(params)}'
-    return Response({'success': True, 'data': {'authorization_url': auth_url, 'state': state}})
+    return Response({'success': True, 'data': {'authorization_url': auth_url}})
 
 
 @api_view(['GET'])
@@ -409,14 +501,29 @@ def linkedin_connect_callback(request):
     if not code or not state:
         return _oauth_callback_html(False, 'پارامترهای کافی ارسال نشده', 'linkedin')
 
-    stored = unsign_state(state)
-    if not stored:
+    with transaction.atomic():
+        oauth_state = LinkedInOAuthState.objects.select_for_update().filter(
+            state_hash=_state_digest(state),
+            consumed_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        ).select_related('user').first()
+        callback_session_key = request.session.session_key or ''
+        if oauth_state and oauth_state.session_key != callback_session_key:
+            oauth_state = None
+        if oauth_state:
+            oauth_state.consumed_at = timezone.now()
+            oauth_state.save(update_fields=['consumed_at'])
+
+    if not oauth_state:
         return _oauth_callback_html(False, 'SESSION_EXPIRED', 'linkedin')
 
-    workspace_id = stored.get('workspace_id')
-    user_id = stored.get('user_id')
-    target = stored.get('platform_target', 'personal')
-    origin = stored.get('origin', '*')
+    workspace_id = oauth_state.workspace_id
+    user = oauth_state.user
+    target = oauth_state.platform_target
+    origin = oauth_state.frontend_origin
+
+    if not WorkspaceMember.objects.filter(workspace_id=workspace_id, user=user, role='admin').exists():
+        return _oauth_callback_html(False, 'دسترسی کاربر به فضای کاری معتبر نیست', 'linkedin', origin)
 
     client_id = getattr(settings, 'LINKEDIN_CLIENT_ID', '')
     client_secret = getattr(settings, 'LINKEDIN_CLIENT_SECRET', '')
@@ -440,7 +547,7 @@ def linkedin_connect_callback(request):
         )
         token_data = token_resp.json()
         if not token_resp.ok or 'access_token' not in token_data:
-            logger.warning(f'LinkedIn token exchange failed: {token_data}')
+            logger.warning('LinkedIn token exchange failed (status=%s)', token_resp.status_code)
             return _oauth_callback_html(False, 'دریافت توکن LinkedIn ناموفق بود', 'linkedin', origin)
 
         access_token = token_data['access_token']
@@ -454,28 +561,33 @@ def linkedin_connect_callback(request):
             headers={'Authorization': f'Bearer {access_token}'},
             timeout=15,
         )
-        userinfo = userinfo_resp.json() if userinfo_resp.ok else {}
+        if not userinfo_resp.ok:
+            logger.warning('LinkedIn userinfo request failed (status=%s)', userinfo_resp.status_code)
+            return _oauth_callback_html(False, 'دریافت اطلاعات حساب LinkedIn ناموفق بود', 'linkedin', origin)
+        userinfo = userinfo_resp.json()
         sub = userinfo.get('sub', '')
+        if not sub:
+            return _oauth_callback_html(False, 'شناسه حساب LinkedIn دریافت نشد', 'linkedin', origin)
         person_urn = f'urn:li:person:{sub}' if sub else ''
-
-        from users.models import User
-        try:
-            user = User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return _oauth_callback_html(False, 'کاربر مرتبط با این درخواست یافت نشد', 'linkedin', origin)
 
         conn, _ = LinkedInConnection.objects.update_or_create(
             workspace_id=workspace_id,
-            user=user,
             platform_target=target,
             defaults={
+                'user': user,
+                'linkedin_subject_id': sub,
                 'access_token': encrypt_token(access_token),
                 'refresh_token': encrypt_token(refresh_token) if refresh_token else '',
                 'access_token_expires_at': timezone.now() + timedelta(seconds=expires_in),
                 'refresh_token_expires_at': timezone.now() + timedelta(seconds=int(refresh_expires_in)) if refresh_expires_in else None,
                 'person_urn': person_urn if target == 'personal' else '',
                 'organization_urn': '',
+                'name': userinfo.get('name', ''),
+                'email': userinfo.get('email', ''),
+                'avatar_url': userinfo.get('picture', ''),
+                'scopes': str(token_data.get('scope', '')).split(),
                 'status': 'active',
+                'disconnected_at': None,
                 'is_active': True,
             },
         )
@@ -486,7 +598,7 @@ def linkedin_connect_callback(request):
             platform='linkedin',
             external_id=person_urn or f'linkedin-{conn.id}',
             defaults={
-                'name': f'LinkedIn — {conn.get_platform_target_display()}',
+                'name': userinfo.get('name') or f'LinkedIn — {conn.get_platform_target_display()}',
                 'channel_type': target,
                 'is_verified': True,
                 'is_active': True,
@@ -498,8 +610,11 @@ def linkedin_connect_callback(request):
             'connection_id': str(conn.id),
             'platform_target': target,
         })
-    except Exception as e:
-        logger.exception(f'LinkedIn OAuth callback failed: {e}')
+    except requests.exceptions.RequestException:
+        logger.exception('LinkedIn OAuth network request failed')
+        return _oauth_callback_html(False, 'ارتباط با LinkedIn برقرار نشد؛ دوباره تلاش کنید', 'linkedin', origin)
+    except Exception:
+        logger.exception('LinkedIn OAuth callback failed')
         return _oauth_callback_html(False, 'اتصال LinkedIn با خطا مواجه شد', 'linkedin', origin)
 
 
@@ -519,11 +634,19 @@ def linkedin_disconnect(request, workspace_id, connection_id):
 
     conn.is_active = False
     conn.status = 'disconnected'
-    conn.save(update_fields=['is_active', 'status'])
+    conn.access_token = ''
+    conn.refresh_token = ''
+    conn.disconnected_at = timezone.now()
+    conn.save(update_fields=['is_active', 'status', 'access_token', 'refresh_token', 'disconnected_at', 'updated_at'])
 
-    PublishChannel.objects.filter(
-        workspace_id=workspace_id, platform='linkedin', external_id__startswith='urn:li:person:'
-    ).update(is_active=False, is_verified=False)
+    linkedin_channels = PublishChannel.objects.filter(
+        workspace_id=workspace_id, platform='linkedin', extra_data__connection_id=str(conn.id)
+    )
+    from publishing.models import PublishJob
+    PublishJob.objects.filter(channel__in=linkedin_channels, status='queued').update(
+        status='failed', completed_at=timezone.now(), next_retry_at=None,
+    )
+    linkedin_channels.update(is_active=False, is_verified=False)
 
     return Response({'success': True, 'data': {'message': 'اتصال LinkedIn حذف شد'}})
 

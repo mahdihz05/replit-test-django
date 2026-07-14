@@ -1,11 +1,29 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useEffect, useState } from "react";
-import { 
-  LayoutDashboard, FileText, Bot, Share2, 
-  SendHorizontal, Wallet, BarChart3, Users, 
-  Settings, LogOut, ChevronDown, Menu, Wand2, ImageIcon,
-  Clock, History, Plus, Building2
+import {
+  LayoutDashboard,
+  FileText,
+  Bot,
+  Share2,
+  SendHorizontal,
+  Wallet,
+  BarChart3,
+  Users,
+  Settings,
+  LogOut,
+  ChevronDown,
+  Menu,
+  Wand2,
+  ImageIcon,
+  Clock,
+  History,
+  Plus,
+  Building2,
+  Megaphone,
+  ContactRound,
+  MessageSquareText,
+  ServerCog,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,7 +37,13 @@ import {
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 
 interface NavItem {
@@ -27,31 +51,102 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   section?: string;
+  child?: boolean;
+  exact?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "داشبورد", icon: LayoutDashboard, section: "اصلی" },
   { href: "/contents", label: "محتوا", icon: FileText, section: "اصلی" },
   { href: "/ai", label: "گفتگوی هوشمند", icon: Bot, section: "هوش مصنوعی" },
-  { href: "/ai/generate", label: "تولید محتوا", icon: Wand2, section: "هوش مصنوعی" },
-  { href: "/ai/images", label: "تولید تصویر", icon: ImageIcon, section: "هوش مصنوعی" },
+  {
+    href: "/ai/generate",
+    label: "تولید محتوا",
+    icon: Wand2,
+    section: "هوش مصنوعی",
+  },
+  {
+    href: "/ai/images",
+    label: "تولید تصویر",
+    icon: ImageIcon,
+    section: "هوش مصنوعی",
+  },
+  {
+    href: "/communication",
+    label: "مرکز ارتباطات",
+    icon: Megaphone,
+    section: "ارتباطات",
+    exact: true,
+  },
+  {
+    href: "/communication/campaigns",
+    label: "کمپین‌ها",
+    icon: SendHorizontal,
+    section: "ارتباطات",
+    child: true,
+  },
+  {
+    href: "/communication/contacts",
+    label: "مخاطبین",
+    icon: ContactRound,
+    section: "ارتباطات",
+    child: true,
+  },
+  {
+    href: "/communication/templates",
+    label: "قالب‌ها",
+    icon: MessageSquareText,
+    section: "ارتباطات",
+    child: true,
+  },
+  {
+    href: "/communication/providers",
+    label: "سرویس‌های ارسال",
+    icon: ServerCog,
+    section: "ارتباطات",
+    child: true,
+  },
   { href: "/channels", label: "کانال‌ها", icon: Share2, section: "انتشار" },
-  { href: "/publish", label: "انتشار محتوا", icon: SendHorizontal, section: "انتشار" },
-  { href: "/publish/queue", label: "صف انتشار", icon: Clock, section: "انتشار" },
-  { href: "/publish/history", label: "تاریخچه", icon: History, section: "انتشار" },
+  {
+    href: "/publish",
+    label: "انتشار محتوا",
+    icon: SendHorizontal,
+    section: "انتشار",
+  },
+  {
+    href: "/publish/queue",
+    label: "صف انتشار",
+    icon: Clock,
+    section: "انتشار",
+  },
+  {
+    href: "/publish/history",
+    label: "تاریخچه",
+    icon: History,
+    section: "انتشار",
+  },
   { href: "/wallet", label: "کیف پول", icon: Wallet, section: "مدیریت" },
   { href: "/reports", label: "گزارش‌ها", icon: BarChart3, section: "مدیریت" },
   { href: "/members", label: "اعضا", icon: Users, section: "مدیریت" },
   { href: "/settings", label: "تنظیمات", icon: Settings, section: "مدیریت" },
 ];
 
-function SidebarContent({ currentLocation, onNavigate }: { currentLocation: string; onNavigate?: () => void }) {
-  const sections = Array.from(new Set(NAV_ITEMS.map(i => i.section)));
+function SidebarContent({
+  currentLocation,
+  onNavigate,
+}: {
+  currentLocation: string;
+  onNavigate?: () => void;
+}) {
+  const sections = Array.from(new Set(NAV_ITEMS.map((i) => i.section)));
 
-  const isActive = (href: string) =>
-    href === "/"
-      ? currentLocation === "/"
-      : currentLocation === href || currentLocation.startsWith(href + "/");
+  const isActive = (item: NavItem) =>
+    item.exact
+      ? currentLocation === item.href
+      : item.href === "/"
+        ? currentLocation === "/"
+        : currentLocation === item.href ||
+          currentLocation.startsWith(item.href + "/");
 
   return (
     <div className="flex flex-col h-full bg-sidebar border-l border-sidebar-border text-sidebar-foreground w-64 shrink-0">
@@ -63,28 +158,32 @@ function SidebarContent({ currentLocation, onNavigate }: { currentLocation: stri
       </div>
 
       <div className="flex-1 px-3 py-1 overflow-y-auto space-y-4">
-        {sections.map(section => {
-          const items = NAV_ITEMS.filter(i => i.section === section);
+        {sections.map((section) => {
+          const items = NAV_ITEMS.filter((i) => i.section === section);
           return (
             <div key={section}>
               <p className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider px-3 mb-1">
                 {section}
               </p>
               <div className="space-y-0.5">
-                {items.map(item => {
-                  const active = isActive(item.href);
+                {items.map((item) => {
+                  const active = isActive(item);
                   return (
                     <Link key={item.href} href={item.href}>
                       <div
                         onClick={onNavigate}
-                        className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
+                        className={`flex items-center gap-3 rounded-md cursor-pointer transition-colors ${item.child ? "mr-5 px-3 py-1.5 border-r border-sidebar-border" : "px-3 py-2"} ${
                           active
                             ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                             : "hover:bg-sidebar-accent/50 text-sidebar-foreground/80"
                         }`}
                       >
-                        <item.icon className={`w-4 h-4 ${active ? "text-primary" : ""}`} />
-                        <span className="text-sm">{item.label}</span>
+                        <item.icon
+                          className={`${item.child ? "w-3.5 h-3.5" : "w-4 h-4"} ${active ? "text-primary" : ""}`}
+                        />
+                        <span className={item.child ? "text-xs" : "text-sm"}>
+                          {item.label}
+                        </span>
                       </div>
                     </Link>
                   );
@@ -99,7 +198,15 @@ function SidebarContent({ currentLocation, onNavigate }: { currentLocation: stri
 }
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, workspaces, selectedWorkspace, selectWorkspace, logout, isLoading, createWorkspace } = useAuth();
+  const {
+    user,
+    workspaces,
+    selectedWorkspace,
+    selectWorkspace,
+    logout,
+    isLoading,
+    createWorkspace,
+  } = useAuth();
   const [location, setLocation] = useLocation();
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -122,7 +229,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     } catch (error) {
       toast({
         title: "خطا",
-        description: error instanceof Error ? error.message : "ساخت فضای کاری با مشکل مواجه شد.",
+        description:
+          error instanceof Error
+            ? error.message
+            : "ساخت فضای کاری با مشکل مواجه شد.",
         variant: "destructive",
       });
     } finally {
@@ -131,7 +241,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center">در حال بارگذاری...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        در حال بارگذاری...
+      </div>
+    );
   }
 
   if (!user) {
@@ -140,7 +254,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (workspaces.length === 0) {
     return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-4" dir="rtl">
+      <div
+        className="min-h-screen bg-background text-foreground flex items-center justify-center p-4"
+        dir="rtl"
+      >
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
@@ -163,7 +280,11 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                   autoFocus
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={creating || !newWorkspaceName.trim()}>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={creating || !newWorkspaceName.trim()}
+              >
                 <Plus className="w-4 h-4 ml-2" />
                 {creating ? "در حال ساخت..." : "ساخت فضای کاری"}
               </Button>
@@ -207,11 +328,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <DropdownMenuContent align="end" className="w-48">
                   <DropdownMenuLabel>فضاهای کاری</DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  {workspaces.map(w => (
+                  {workspaces.map((w) => (
                     <DropdownMenuItem
                       key={w.id}
                       onClick={() => selectWorkspace(w.id)}
-                      className={w.id === selectedWorkspace.id ? "bg-accent" : ""}
+                      className={
+                        w.id === selectedWorkspace.id ? "bg-accent" : ""
+                      }
                     >
                       {w.name}
                     </DropdownMenuItem>
@@ -236,9 +359,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         <main className="flex-1 overflow-auto p-4 lg:p-8">
-          <div className="max-w-7xl mx-auto h-full">
-            {children}
-          </div>
+          <div className="max-w-7xl mx-auto h-full">{children}</div>
         </main>
       </div>
     </div>

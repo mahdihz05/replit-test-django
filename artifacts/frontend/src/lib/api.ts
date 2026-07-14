@@ -59,7 +59,21 @@ export async function apiFetch(endpoint: string, options: FetchOptions = {}) {
       window.location.href = "/login";
     }
     const errorData = await response.json().catch(() => ({}));
-    const message = errorData.error || errorData.detail || errorData.message || "خطا در برقراری ارتباط با سرور";
+    const flattenError = (value: unknown): string => {
+      if (typeof value === "string") return value;
+      if (Array.isArray(value))
+        return value.map(flattenError).filter(Boolean).join("، ");
+      if (value && typeof value === "object") {
+        return Object.entries(value)
+          .map(([field, detail]) => `${field}: ${flattenError(detail)}`)
+          .filter(Boolean)
+          .join(" | ");
+      }
+      return "";
+    };
+    const message =
+      flattenError(errorData.error || errorData.detail || errorData.message) ||
+      `خطای سرور (${response.status})`;
     throw new Error(message);
   }
 

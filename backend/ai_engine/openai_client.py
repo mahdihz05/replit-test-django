@@ -1,12 +1,11 @@
 import os
+import base64
 import urllib.parse
 import requests
 from django.conf import settings
+from config.ai import get_image_defaults, get_model
 
 from . import prompts
-
-
-default_chat_model = 'gpt-4.1-mini'
 
 
 def get_openai_client():
@@ -18,13 +17,14 @@ def get_openai_client():
         return None
 
 
-def _call_chat(system_prompt, user_prompt, model=None, response_format=None, max_retries=1):
+def _call_chat(system_prompt, user_prompt, model=None, response_format=None, max_retries=1,
+               operation_name='content_generation'):
     """Thin wrapper around chat.completions.create with retry."""
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
         return None, 'کلید API هوش مصنوعی تنظیم نشده است', 0
 
-    model = model or default_chat_model
+    model = model or get_model(operation_name)
     messages = [
         {'role': 'system', 'content': system_prompt},
         {'role': 'user', 'content': user_prompt}
@@ -51,19 +51,19 @@ def generate_text(goal, platform='', tone='حرفه‌ای', keywords='', langua
     system_prompt, user_prompt = prompts.build_text_prompt(
         goal=goal, platform=platform, tone=tone, keywords=keywords, language=language, word_count=word_count, is_caption=is_caption
     )
-    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    text, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='text_generation')
     return text, error, tokens
 
 
 def rewrite_text(text, tone='حرفه‌ای', platform=''):
     system_prompt, user_prompt = prompts.build_rewrite_prompt(text, tone, platform)
-    result, error, tokens = _call_chat(system_prompt, user_prompt)
+    result, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='content_rewrite')
     return result, error, tokens
 
 
 def suggest_titles(topic, count=5, platform=''):
     system_prompt, user_prompt = prompts.build_titles_prompt(topic, count, platform)
-    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    text, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='title_suggestions')
     if error:
         return None, error, tokens
     titles = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
@@ -72,7 +72,7 @@ def suggest_titles(topic, count=5, platform=''):
 
 def suggest_hashtags(topic, count=10, platform=''):
     system_prompt, user_prompt = prompts.build_hashtags_prompt(topic, count, platform)
-    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    text, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='hashtag_suggestions')
     if error:
         return None, error, tokens
     hashtags = [t.strip() for t in text.strip().split('\n') if t.strip()][:count]
@@ -81,7 +81,7 @@ def suggest_hashtags(topic, count=10, platform=''):
 
 def generate_cta(goal, platform='', count=3):
     system_prompt, user_prompt = prompts.build_cta_prompt(goal, platform, count)
-    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    text, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='cta_generation')
     if error:
         return None, error, tokens
     ctas = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
@@ -105,6 +105,19 @@ def _save_image_from_url(image_url: str) -> str:
     return f'content/images/{filename}'
 
 
+def _save_image_from_base64(image_data: str) -> str:
+    """Save a base64 API image response and return its MEDIA_ROOT-relative path."""
+    from django.conf import settings as django_settings
+    import uuid
+
+    directory = os.path.join(django_settings.MEDIA_ROOT, 'content/images')
+    os.makedirs(directory, exist_ok=True)
+    filename = f'{uuid.uuid4()}.png'
+    with open(os.path.join(directory, filename), 'wb') as image_file:
+        image_file.write(base64.b64decode(image_data))
+    return f'content/images/{filename}'
+
+
 def _generate_with_pollinations(prompt: str, width: int = 1024, height: int = 1024):
     """Generate an image using Pollinations.ai (no API key required). Returns a public image URL."""
     encoded = urllib.parse.quote(prompt)
@@ -118,11 +131,11 @@ def _generate_with_pollinations(prompt: str, width: int = 1024, height: int = 10
 
 
 def generate_image(description, style='', platform='', enhance=True):
-    """Generate an image. Try DALL-E 3 first; fall back to Pollinations.ai if OpenAI image models are unavailable.
+    """Generate an image with the configured OpenAI model, then use the existing fallback.
 
     When enhance=False, the description is assumed to be a fully-formed prompt and is passed
     through without re-appending platform/style notes. This is used by generate_image_from_text
-    which already produces a refined DALL-E prompt.
+    which already produces a refined image prompt.
     """
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
@@ -132,18 +145,27 @@ def generate_image(description, style='', platform='', enhance=True):
     if style:
         prompt += f', style: {style}'
 
-    # Try OpenAI DALL-E 3 first.
+    image_defaults = get_image_defaults()
+
+    # Try the configured OpenAI image model first.
     openai_error = None
     try:
         response = client.images.generate(
-            model='dall-e-3',
+            model=image_defaults['model'],
             prompt=prompt,
-            size='1024x1024',
-            quality='standard',
-            n=1
+            size=image_defaults['size'],
+            quality=image_defaults['quality'],
+            response_format='b64_json',
+            output_format='png',
+            n=1,
         )
-        image_url = response.data[0].url
-        relative_path = _save_image_from_url(image_url)
+        image = response.data[0]
+        if image.b64_json:
+            relative_path = _save_image_from_base64(image.b64_json)
+        elif image.url:
+            relative_path = _save_image_from_url(image.url)
+        else:
+            raise ValueError('OpenAI image response did not contain image data')
         return relative_path, None
     except Exception as e:
         openai_error = str(e)
@@ -158,21 +180,21 @@ def generate_image(description, style='', platform='', enhance=True):
 
 
 def generate_image_prompt(source_text, max_words=25, platform=''):
-    """Ask the mini model to write a short English DALL-E prompt from the given Persian text."""
+    """Ask the content model to write a short English image prompt."""
     system_prompt = (
         'You are an expert image prompt engineer. Based on the text provided, '
-        'write a concise, vivid English image generation prompt suitable for DALL-E 3. '
+        'write a concise, vivid English prompt for the configured image generation model. '
         'Return only the prompt, no extra explanation.'
     )
     user_prompt = prompts.build_image_prompt_from_text(source_text, platform, max_words)
-    prompt, error, tokens = _call_chat(system_prompt, user_prompt)
+    prompt, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='content_generation')
     if prompt:
         prompt = prompt.strip()
     return prompt, error, tokens
 
 
 def generate_image_from_text(source_text, style='', platform=''):
-    """Two-step image generation: create a DALL-E prompt from text, then generate image.
+    """Two-step image generation: create an image prompt, then generate the image.
 
     The prompt produced by generate_image_prompt already contains platform context and
     English visual details, so we pass it through without re-enhancing.
@@ -189,19 +211,19 @@ def generate_summary(text, length='brief', platform=''):
         # Summaries are usually platform-agnostic, but if the caller provides a platform we can
         # add a light hint that the summary may be used as caption/copy for that platform.
         user_prompt = f"{prompts.get_platform_rules(platform)}\n\n{user_prompt}"
-    result, error, tokens = _call_chat(system_prompt, user_prompt)
+    result, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='content_rewrite')
     return result, error, tokens
 
 
 def generate_scenario(topic, platform='', goal=''):
     system_prompt, user_prompt = prompts.build_scenario_prompt(topic, platform, goal)
-    result, error, tokens = _call_chat(system_prompt, user_prompt)
+    result, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='text_generation')
     return result, error, tokens
 
 
 def generate_idea(niche, platform='', count=5):
     system_prompt, user_prompt = prompts.build_idea_prompt(niche, platform, count)
-    text, error, tokens = _call_chat(system_prompt, user_prompt)
+    text, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='title_suggestions')
     if error:
         return None, error, tokens
     ideas = [t.strip().lstrip('0123456789.-) ') for t in text.strip().split('\n') if t.strip()][:count]
@@ -223,7 +245,7 @@ def chat_completion(messages, platform=''):
 
     try:
         response = client.chat.completions.create(
-            model=default_chat_model,
+            model=get_model('chat'),
             messages=full_messages
         )
         text = response.choices[0].message.content
@@ -255,7 +277,8 @@ def _parse_json(text):
         return None
 
 
-def _call_openai_with_retry(system_prompt, user_prompt, response_format=None, max_retries=3, validate=None):
+def _call_openai_with_retry(system_prompt, user_prompt, response_format=None, max_retries=3,
+                            validate=None, operation_name='content_generation'):
     """Call OpenAI with retry. validate(text) should return parsed object on success or None on failure."""
     client = get_openai_client()
     if not client or not settings.OPENAI_API_KEY:
@@ -270,7 +293,7 @@ def _call_openai_with_retry(system_prompt, user_prompt, response_format=None, ma
     total_tokens = 0
     for attempt in range(max_retries):
         try:
-            kwargs = {'model': default_chat_model, 'messages': messages}
+            kwargs = {'model': get_model(operation_name), 'messages': messages}
             if response_format:
                 kwargs['response_format'] = response_format
             response = client.chat.completions.create(**kwargs)
@@ -303,7 +326,8 @@ def generate_bundle(topic, platform='', tone='حرفه‌ای'):
     """Generate full text, short text, hashtags and title in one OpenAI call."""
     system_prompt, user_prompt = prompts.build_bundle_prompt(topic, platform, tone)
     data, error, tokens = _call_openai_with_retry(
-        system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3, validate=_validate_bundle
+        system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3,
+        validate=_validate_bundle, operation_name='ai_generate_bundle'
     )
     return data, error, tokens
 
@@ -322,6 +346,7 @@ def generate_variants(capability, params, count=2):
     system_prompt, user_prompt = prompts.build_variants_prompt(capability, params, count)
 
     variants, error, tokens = _call_openai_with_retry(
-        system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3, validate=_validate_variants(count)
+        system_prompt, user_prompt, response_format={'type': 'json_object'}, max_retries=3,
+        validate=_validate_variants(count), operation_name=f'ai_generate_variant_{count}'
     )
     return variants, error, tokens

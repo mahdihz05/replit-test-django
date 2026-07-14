@@ -16,7 +16,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Send, Share2, CheckCircle2, XCircle, Clock, Copy, RefreshCw,
-  Trash2, Zap, AlertCircle, Loader2, Globe, Linkedin
+  Trash2, Zap, AlertCircle, Loader2, Globe, Linkedin, ShieldCheck,
+  BookOpen, ArrowLeft
 } from "lucide-react";
 
 interface Channel {
@@ -68,6 +69,49 @@ function getPlatformIcon(platform: string, size = "w-5 h-5") {
   return <Share2 className={`${size} text-muted-foreground`} />;
 }
 
+const CONNECTION_GUIDES: Record<string, { title: string; note: string; steps: string[] }> = {
+  telegram: {
+    title: "اتصال کانال یا گروه تلگرام",
+    note: "رمز یا کد ورود تلگرام شما در هیچ مرحله‌ای از شما خواسته نمی‌شود.",
+    steps: [
+      "ربات محتوایار را به کانال یا گروه خود اضافه کنید.",
+      "ربات را ادمین کنید و مجوز ارسال پیام را فعال نگه دارید.",
+      "شناسه عمومی @username یا chat_id کانال را در مرحله بعد وارد کنید.",
+      "سامانه دسترسی ربات را بررسی و کانال را همان لحظه فعال می‌کند.",
+    ],
+  },
+  bale: {
+    title: "اتصال کانال یا گروه بله",
+    note: "فقط ربات محتوایار به کانال دسترسی می‌گیرد؛ اطلاعات حساب شخصی شما دریافت نمی‌شود.",
+    steps: [
+      "ربات محتوایار را به کانال یا گروه بله اضافه کنید.",
+      "ربات را مدیر کنید تا اجازه انتشار داشته باشد.",
+      "کد تأییدی را که سامانه می‌سازد داخل کانال ارسال کنید.",
+      "پس از شناسایی کد، کانال خودکار به لیست انتشار اضافه می‌شود.",
+    ],
+  },
+  linkedin: {
+    title: "اتصال امن حساب LinkedIn",
+    note: "ورود فقط در صفحه رسمی linkedin.com انجام می‌شود؛ رمز عبور و توکن شما هرگز به مرورگر محتوایار برنمی‌گردد.",
+    steps: [
+      "در مرحله بعد «پروفایل شخصی» را انتخاب کنید.",
+      "روی اتصال بزنید تا صفحه رسمی LinkedIn در پنجره‌ای امن باز شود.",
+      "وارد LinkedIn شوید و مجوز مشاهده پروفایل و انتشار محتوا را تأیید کنید.",
+      "پس از بازگشت خودکار، حساب آماده تولید، انتشار فوری و زمان‌بندی محتواست.",
+    ],
+  },
+  wordpress: {
+    title: "اتصال سایت WordPress",
+    note: "برای امنیت بیشتر از Application Password استفاده می‌شود و رمز اصلی وردپرس لازم نیست.",
+    steps: [
+      "آدرس کامل سایت وردپرسی را وارد کنید.",
+      "در وردپرس یک Application Password مخصوص محتوایار بسازید.",
+      "مجوز اتصال را در صفحه سایت خود تأیید کنید.",
+      "پس از بازگشت، انتشار نوشته و تصویر برای سایت فعال می‌شود.",
+    ],
+  },
+};
+
 function VerificationCountdown({ expiresAt }: { expiresAt: string }) {
   const [remaining, setRemaining] = useState(0);
   useEffect(() => {
@@ -112,6 +156,7 @@ export default function Channels() {
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [platform, setPlatform] = useState<"telegram" | "bale" | "linkedin" | "wordpress" | "">("");
   const [channelType, setChannelType] = useState<"channel" | "group">("channel");
@@ -211,6 +256,7 @@ export default function Channels() {
     stopPolling();
     if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
     setShowModal(false);
+    setShowGuide(false);
     setStep(1);
     setPlatform("");
     setChannelType("channel");
@@ -239,6 +285,27 @@ export default function Channels() {
       data.name = channelName.trim();
       data.channel_type = channelType;
       setVerification(data);
+
+      if (platform === "telegram" && (manualChatId.trim() || manualUsername.trim())) {
+        const confirmed = await apiFetch(
+          `/workspaces/${selectedWorkspace.id}/channels/verify/${data.token}/confirm/`,
+          {
+            method: "POST",
+            data: {
+              chat_id: manualChatId.trim(),
+              username: manualUsername.trim(),
+            },
+          }
+        );
+        if (!confirmed?.success) {
+          throw new Error(confirmed?.error || "تأیید کانال ناموفق بود");
+        }
+        setVerification({ ...data, status: "verified" });
+        setStep(4);
+        fetchChannels();
+        return;
+      }
+
       setStep(3);
       startPolling(data.token);
     } catch (e: any) {
@@ -549,7 +616,7 @@ export default function Channels() {
 
       {/* Add Channel Modal */}
       <Dialog open={showModal} onOpenChange={open => !open && closeModal()}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>افزودن کانال جدید</DialogTitle>
             <DialogDescription>
@@ -572,7 +639,7 @@ export default function Channels() {
                 ] as const).map(([p, label]) => (
                   <button
                     key={p}
-                    onClick={() => { setPlatform(p); setStep(2); }}
+                    onClick={() => { setPlatform(p); setShowGuide(true); setStep(2); }}
                     className={`flex flex-col items-center gap-3 p-6 rounded-lg border-2 transition-all hover:border-primary hover:bg-primary/5 ${platform === p ? "border-primary bg-primary/5" : "border-border"}`}
                   >
                     {getPlatformIcon(p, "w-10 h-10")}
@@ -583,7 +650,50 @@ export default function Channels() {
             </div>
           )}
 
-          {step === 2 && isBotPlatform && (
+          {step === 2 && showGuide && platform && (
+            <div className="space-y-5">
+              <div className="flex items-center gap-3 rounded-xl border bg-muted/40 p-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-background shadow-sm">
+                  {getPlatformIcon(platform, "w-7 h-7")}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 text-xs text-primary">
+                    <BookOpen className="h-3.5 w-3.5" />
+                    راهنمای اتصال
+                  </div>
+                  <h3 className="mt-1 font-semibold">{CONNECTION_GUIDES[platform].title}</h3>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {CONNECTION_GUIDES[platform].steps.map((item, index) => (
+                  <div key={item} className="flex gap-3 rounded-lg border p-3">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+                      {index + 1}
+                    </span>
+                    <p className="pt-0.5 text-sm leading-6">{item}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-xs leading-5 text-green-800">
+                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{CONNECTION_GUIDES[platform].note}</span>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => { setShowGuide(false); setStep(1); }} className="flex-1">
+                  برگشت
+                </Button>
+                <Button onClick={() => setShowGuide(false)} className="flex-1 gap-2">
+                  شروع اتصال
+                  <ArrowLeft className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && !showGuide && isBotPlatform && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
                 {getPlatformIcon(platform)}
@@ -612,9 +722,42 @@ export default function Channels() {
                   placeholder="مثال: کانال اخبار ما"
                   value={channelName}
                   onChange={e => setChannelName(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && channelName.trim() && handleStartVerification()}
+                  onKeyDown={e => {
+                    const hasTelegramTarget = manualChatId.trim() || manualUsername.trim();
+                    if (e.key === "Enter" && channelName.trim() && (platform !== "telegram" || hasTelegramTarget)) {
+                      handleStartVerification();
+                    }
+                  }}
                 />
               </div>
+
+              {platform === "telegram" && (
+                <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <div>
+                    <Label>شناسه کانال تلگرام</Label>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      ربات @{botStatus?.bot?.username || "abrit_content_bot"} را ادمین کنید، سپس یکی از موارد زیر را وارد کنید.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      placeholder="chat_id مانند -100..."
+                      value={manualChatId}
+                      onChange={e => setManualChatId(e.target.value)}
+                      className="dir-ltr"
+                    />
+                    <Input
+                      placeholder="@username کانال"
+                      value={manualUsername}
+                      onChange={e => setManualUsername(e.target.value)}
+                      className="dir-ltr"
+                    />
+                  </div>
+                  <p className="text-xs text-blue-700">
+                    سامانه مستقیماً ادمین بودن و مجوز ارسال پیام ربات را بررسی می‌کند.
+                  </p>
+                </div>
+              )}
 
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
@@ -622,7 +765,11 @@ export default function Channels() {
                 </Button>
                 <Button
                   onClick={handleStartVerification}
-                  disabled={!channelName.trim() || submitting}
+                  disabled={
+                    !channelName.trim() ||
+                    submitting ||
+                    (platform === "telegram" && !manualChatId.trim() && !manualUsername.trim())
+                  }
                   className="flex-1 gap-2"
                 >
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
@@ -632,7 +779,7 @@ export default function Channels() {
             </div>
           )}
 
-          {step === 2 && isLinkedIn && (
+          {step === 2 && !showGuide && isLinkedIn && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
                 {getPlatformIcon("linkedin")}
@@ -645,13 +792,17 @@ export default function Channels() {
                   {(["personal", "organization"] as const).map(t => (
                     <button
                       key={t}
+                      disabled={t === "organization"}
                       onClick={() => setLinkedinTarget(t)}
-                      className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${linkedinTarget === t ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-muted-foreground"}`}
+                      className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${t === "organization" ? "cursor-not-allowed opacity-50" : ""} ${linkedinTarget === t ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-muted-foreground"}`}
                     >
-                      {TYPE_NAMES[t]}
+                      {TYPE_NAMES[t]} {t === "organization" && <span className="text-[10px]">(نیازمند تأیید)</span>}
                     </button>
                   ))}
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  اتصال صفحه سازمانی به تأیید Community Management API از طرف LinkedIn نیاز دارد؛ پروفایل شخصی اکنون قابل اتصال است.
+                </p>
               </div>
 
               <div className="flex gap-2 pt-2">
@@ -670,7 +821,7 @@ export default function Channels() {
             </div>
           )}
 
-          {step === 2 && isWordPress && (
+          {step === 2 && !showGuide && isWordPress && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
                 {getPlatformIcon("wordpress")}

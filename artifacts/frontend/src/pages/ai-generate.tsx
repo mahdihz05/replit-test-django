@@ -53,15 +53,16 @@ const PLATFORMS = [
   { value: "", label: "عمومی" },
 ];
 
-const COSTS: Record<string, number> = {
-  text_generation: 10,
-  content_rewrite: 8,
-  title_suggestions: 3,
-  hashtag_suggestions: 2,
-  cta_generation: 3,
-  ai_generate_bundle: 25,
-  ai_generate_variant_2: 16,
-  ai_generate_variant_3: 22,
+const DEFAULT_COSTS: Record<string, number> = {
+  text_generation: 500,
+  image_generation: 9800,
+  content_rewrite: 350,
+  title_suggestions: 30,
+  hashtag_suggestions: 30,
+  cta_generation: 40,
+  ai_generate_bundle: 1800,
+  ai_generate_variant_2: 1100,
+  ai_generate_variant_3: 1600,
 };
 
 const ITEM_LABELS: Record<string, string> = {
@@ -100,39 +101,43 @@ export default function AiGenerate() {
   const [imageRegenerating, setImageRegenerating] = useState<Record<string, boolean>>({});
   const [imagePreviewOpen, setImagePreviewOpen] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [costs, setCosts] = useState<Record<string, number>>(DEFAULT_COSTS);
   const [publishOpen, setPublishOpen] = useState(false);
 
   const wid = selectedWorkspace?.id;
 
-  const IMAGE_COST = 25;
+  const IMAGE_COST = costs.image_generation ?? DEFAULT_COSTS.image_generation;
 
   useEffect(() => {
     if (!wid) return;
     apiFetch(`/workspaces/${wid}/wallet/`)
-      .then(res => setWalletBalance(res?.data?.balance ?? 0))
+      .then(res => {
+        setWalletBalance(res?.data?.balance ?? 0);
+        if (res?.data?.wallet_costs) setCosts({ ...DEFAULT_COSTS, ...res.data.wallet_costs });
+      })
       .catch(() => setWalletBalance(null));
   }, [wid]);
 
   const estimatedCost = () => {
     let base = 0;
-    if (mode === "bundle") base = COSTS.ai_generate_bundle;
+    if (mode === "bundle") base = costs.ai_generate_bundle;
     else if (mode === "multi_variant") {
-      base = variantCount === "2" ? COSTS.ai_generate_variant_2 : COSTS.ai_generate_variant_3;
+      base = variantCount === "2" ? costs.ai_generate_variant_2 : costs.ai_generate_variant_3;
     } else {
       switch (activeTab) {
         case "text":
         case "scenario":
-          base = COSTS.text_generation; break;
+          base = costs.text_generation; break;
         case "rewrite":
         case "summary":
-          base = COSTS.content_rewrite; break;
+          base = costs.content_rewrite; break;
         case "title":
         case "idea":
-          base = COSTS.title_suggestions; break;
+          base = costs.title_suggestions; break;
         case "hashtag":
-          base = COSTS.hashtag_suggestions; break;
+          base = costs.hashtag_suggestions; break;
         case "cta":
-          base = COSTS.cta_generation; break;
+          base = costs.cta_generation; break;
         default:
           base = 0;
       }
@@ -619,7 +624,7 @@ export default function AiGenerate() {
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">ابزارهای هوش مصنوعی</h1>
-        <p className="text-muted-foreground mt-1">تولید محتوا با GPT-4.1 mini برای تمام نیازهای بازاریابی</p>
+        <p className="text-muted-foreground mt-1">تولید محتوا با GPT-5 mini برای تمام نیازهای بازاریابی</p>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
@@ -673,11 +678,11 @@ export default function AiGenerate() {
               <div className="flex items-center gap-2">
                 <Checkbox id="generateImage" checked={generateImage} onCheckedChange={v => setGenerateImage(!!v)} />
                 <Label htmlFor="generateImage" className="text-sm font-normal flex items-center gap-1.5">
-                  <Image className="w-3.5 h-3.5" /> تولید تصویر همزمان با متن (+{IMAGE_COST} تومان)
+                  <Image className="w-3.5 h-3.5" /> تولید تصویر همزمان با متن (+{IMAGE_COST.toLocaleString("fa-IR")} تومان)
                 </Label>
               </div>
               <div className="text-sm flex items-center justify-between">
-                <span className="text-muted-foreground">هزینه تخمینی: <strong className="text-foreground">{estimatedCost()} تومان</strong></span>
+                <span className="text-muted-foreground">هزینه تخمینی: <strong className="text-foreground">{estimatedCost().toLocaleString("fa-IR")} تومان</strong></span>
                 {walletBalance !== null && (
                   <span className={`flex items-center gap-1 ${hasInsufficientBalance ? "text-destructive font-medium" : "text-muted-foreground"}`}>
                     <Wallet className="w-3.5 h-3.5" />

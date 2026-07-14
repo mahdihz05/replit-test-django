@@ -173,7 +173,7 @@ export default function AiChat() {
           </div>
           <div>
             <h2 className="font-semibold text-sm">دستیار هوشمند محتوا</h2>
-            <p className="text-xs text-muted-foreground">GPT-4o · فارسی و انگلیسی</p>
+            <p className="text-xs text-muted-foreground">GPT-5 mini · فارسی و انگلیسی</p>
           </div>
           <div className="mr-auto md:hidden">
             <Button size="sm" variant="outline" className="gap-1.5" onClick={createNewSession}>

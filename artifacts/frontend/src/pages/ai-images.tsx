@@ -29,16 +29,21 @@ export default function AiImages() {
   const [contentId, setContentId] = useState<string | null>(null);
   const [history, setHistory] = useState<{ url: string; prompt: string; platform: string; contentId?: string }[]>([]);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const IMAGE_COST = 25;
+  const [imageCost, setImageCost] = useState(9800);
 
   useEffect(() => {
     if (!selectedWorkspace) return;
     apiFetch(`/workspaces/${selectedWorkspace.id}/wallet/`)
-      .then(res => setWalletBalance(res?.data?.balance ?? 0))
+      .then(res => {
+        setWalletBalance(res?.data?.balance ?? 0);
+        if (res?.data?.wallet_costs?.image_generation) {
+          setImageCost(Number(res.data.wallet_costs.image_generation));
+        }
+      })
       .catch(() => setWalletBalance(null));
   }, [selectedWorkspace]);
 
-  const hasInsufficientBalance = walletBalance !== null && walletBalance < IMAGE_COST;
+  const hasInsufficientBalance = walletBalance !== null && walletBalance < imageCost;
 
   const handleGenerate = async () => {
     if (!prompt.trim() || !selectedWorkspace || hasInsufficientBalance) return;
@@ -75,7 +80,7 @@ export default function AiImages() {
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">تولید تصویر با هوش مصنوعی</h1>
-        <p className="text-muted-foreground mt-1">با DALL-E 3 تصاویر خلاقانه بسازید</p>
+        <p className="text-muted-foreground mt-1">با GPT Image تصاویر خلاقانه بسازید</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -114,7 +119,7 @@ export default function AiImages() {
               </Select>
             </div>
             <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-xs text-amber-800 dark:text-amber-400">
-              ⚠️ هر بار تولید تصویر {IMAGE_COST.toLocaleString("fa-IR")} تومان از کیف پول کسر می‌شود
+              ⚠️ هر بار تولید تصویر {imageCost.toLocaleString("fa-IR")} تومان از کیف پول کسر می‌شود
             </div>
             {walletBalance !== null && (
               <div className={`text-xs flex items-center justify-between ${hasInsufficientBalance ? "text-destructive font-medium" : "text-muted-foreground"}`}>

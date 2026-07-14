@@ -7,6 +7,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from django.core.signing import TimestampSigner, BadSignature
 from django.core.cache import cache
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 
 logger = logging.getLogger(__name__)
 
@@ -14,12 +15,17 @@ logger = logging.getLogger(__name__)
 def _get_key() -> bytes:
     """Return the Fernet key used for encrypting tokens."""
     key = (
-        os.environ.get('SHARED_TOKEN_ENCRYPTION_KEY')
+        getattr(settings, 'SHARED_TOKEN_ENCRYPTION_KEY', '')
+        or getattr(settings, 'LINKEDIN_TOKEN_ENCRYPTION_KEY', '')
+        or os.environ.get('SHARED_TOKEN_ENCRYPTION_KEY')
         or os.environ.get('LINKEDIN_TOKEN_ENCRYPTION_KEY')
     )
     if not key:
-        # Fallback to deriving a key from Django SECRET_KEY. This is not ideal
-        # for production but keeps the app functional when no env var is set.
+        if not settings.DEBUG:
+            raise ImproperlyConfigured(
+                'SHARED_TOKEN_ENCRYPTION_KEY or LINKEDIN_TOKEN_ENCRYPTION_KEY must be set in production.'
+            )
+        # Development-only fallback keeps local onboarding simple.
         import base64
         import hashlib
         derived = hashlib.sha256(settings.SECRET_KEY.encode()).digest()

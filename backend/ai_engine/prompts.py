@@ -433,7 +433,7 @@ def build_image_prompt_from_text(source_text: str, platform: str, max_words: int
     visual_note = platform_visual_notes.get(p, "The image should be high-quality and suitable for social media or web use.")
 
     prompt = (
-        f"Write a concise, vivid English image generation prompt for DALL-E 3 based on the following Persian text. "
+        f"Write a concise, vivid English image generation prompt based on the following Persian text. "
         f"Maximum {max_words} words. Focus on real visual elements. "
         f"Do not ask for typography or text inside the image. {visual_note}\n\n"
         f"Source text:\n{source_text[:2000]}\n\n"

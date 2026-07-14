@@ -78,21 +78,59 @@ class LinkedInConnection(models.Model):
     workspace = models.ForeignKey('workspaces.Workspace', on_delete=models.CASCADE, related_name='linkedin_connections')
     user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='linkedin_connections')
     platform_target = models.CharField(max_length=20, choices=TARGET_CHOICES, default='personal')
+    linkedin_subject_id = models.CharField(max_length=255, blank=True)
     person_urn = models.CharField(max_length=255, blank=True)
     organization_urn = models.CharField(max_length=255, blank=True)
+    name = models.CharField(max_length=255, blank=True)
+    email = models.EmailField(blank=True)
+    avatar_url = models.URLField(max_length=1000, blank=True)
+    scopes = models.JSONField(default=list, blank=True)
     access_token = models.TextField()
     refresh_token = models.TextField(blank=True)
     access_token_expires_at = models.DateTimeField(null=True, blank=True)
     refresh_token_expires_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     connected_at = models.DateTimeField(auto_now_add=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'channels_linkedinconnection'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['workspace', 'platform_target'],
+                name='unique_linkedin_target_per_workspace',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['workspace', 'status', 'is_active'], name='linkedin_conn_status_idx'),
+            models.Index(fields=['linkedin_subject_id'], name='linkedin_subject_idx'),
+        ]
 
     def __str__(self):
         return f'LinkedIn {self.platform_target} for {self.workspace}'
+
+
+class LinkedInOAuthState(models.Model):
+    """Short-lived, one-time OAuth state. Only the SHA-256 digest is persisted."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey('users.User', on_delete=models.CASCADE, related_name='linkedin_oauth_states')
+    workspace = models.ForeignKey('workspaces.Workspace', on_delete=models.CASCADE)
+    state_hash = models.CharField(max_length=64, unique=True)
+    session_key = models.CharField(max_length=64, blank=True)
+    platform_target = models.CharField(max_length=20, choices=LinkedInConnection.TARGET_CHOICES, default='personal')
+    frontend_origin = models.URLField(max_length=500)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'channels_linkedinoauthstate'
+        indexes = [
+            models.Index(fields=['expires_at', 'consumed_at'], name='linkedin_oauth_exp_idx'),
+        ]
 
 
 class WordPressConnection(models.Model):

@@ -30,7 +30,7 @@ def get_member(user, workspace_id):
 PLATFORM_MEDIA_LIMITS = {
     'telegram': 50 * 1024 * 1024,
     'bale': 50 * 1024 * 1024,
-    'linkedin': 5 * 1024 * 1024 * 1024,  # video upload limit ~5GB (phase upload)
+    'linkedin': 500 * 1024 * 1024,
     'wordpress': None,  # checked per site later
 }
 

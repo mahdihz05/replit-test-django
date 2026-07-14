@@ -5,6 +5,7 @@ import re
 import requests
 import threading
 import time
+from config.network import telegram_request
 
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -122,7 +123,7 @@ def _telegram_api(token: str, method: str, payload: dict = None, timeout: int = 
     """Call a Telegram Bot API method and return the JSON response."""
     try:
         url = f'https://api.telegram.org/bot{token}/{method}'
-        resp = requests.post(url, json=payload or {}, timeout=timeout)
+        resp = telegram_request('POST', url, json=payload or {}, timeout=timeout)
         return resp.json()
     except Exception as e:
         logger.warning(f'[Bot] Telegram API {method} failed: {e}')
@@ -194,6 +195,7 @@ def start_bot():
             try:
                 from telegram import Update
                 from telegram.ext import Application, MessageHandler, filters
+                from telegram.request import HTTPXRequest
 
                 async def on_message(update: Update, context):
                     if not update.effective_message or not update.effective_message.text:
@@ -209,7 +211,24 @@ def start_bot():
                     if reply:
                         await update.effective_message.reply_text(reply)
 
-                app = Application.builder().token(token).build()
+                trust_env = getattr(settings, 'TELEGRAM_TRUST_ENV_PROXY', False)
+                proxy_url = getattr(settings, 'TELEGRAM_PROXY_URL', '') or None
+                api_request = HTTPXRequest(
+                    proxy=proxy_url,
+                    httpx_kwargs={'trust_env': trust_env},
+                )
+                updates_request = HTTPXRequest(
+                    read_timeout=10,
+                    proxy=proxy_url,
+                    httpx_kwargs={'trust_env': trust_env},
+                )
+                app = (
+                    Application.builder()
+                    .token(token)
+                    .request(api_request)
+                    .get_updates_request(updates_request)
+                    .build()
+                )
                 app.add_handler(
                     MessageHandler(
                         filters.TEXT

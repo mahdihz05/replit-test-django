@@ -1,6 +1,7 @@
 import requests
 import json
 import logging
+from config.network import telegram_request
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,7 @@ def _call(token, method, payload):
         return None, 'توکن ربات تلگرام تنظیم نشده است'
     url = TELEGRAM_API.format(token=token, method=method)
     try:
-        resp = requests.post(url, json=payload, timeout=15)
+        resp = telegram_request('POST', url, json=payload, timeout=15)
         data = resp.json()
         if not data.get('ok'):
             desc = data.get('description', 'Unknown error')
@@ -86,8 +87,8 @@ def _send_media_group(token, chat_id, attachments):
 
     url = TELEGRAM_API.format(token=token, method='sendMediaGroup')
     try:
-        resp = requests.post(
-            url,
+        resp = telegram_request(
+            'POST', url,
             data={'chat_id': chat_id, 'media': json.dumps(media)},
             files=files,
             timeout=120,
@@ -129,8 +130,8 @@ def _send_single_media(token, chat_id, attachment):
 
     url = TELEGRAM_API.format(token=token, method=method)
     try:
-        resp = requests.post(
-            url,
+        resp = telegram_request(
+            'POST', url,
             data={'chat_id': chat_id, 'parse_mode': 'HTML'},
             files={file_field: (attachment.get('original_filename', 'file'), file_data, attachment.get('mime_type', 'application/octet-stream'))},
             timeout=60,

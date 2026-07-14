@@ -1,6 +1,70 @@
 import uuid
+from copy import deepcopy
 from django.db import models
 from django.conf import settings
+
+from config.ai import (
+    AI_MODELS,
+    ESTIMATED_TOKEN_USAGE,
+    IMAGE_GENERATION_DEFAULTS,
+    IMAGE_WALLET_COSTS,
+    MODEL_PRICING_USD,
+    WALLET_COSTS,
+)
+
+
+def default_ai_models():
+    return deepcopy(AI_MODELS)
+
+
+def default_model_pricing():
+    return deepcopy(MODEL_PRICING_USD)
+
+
+def default_token_usage():
+    return deepcopy(ESTIMATED_TOKEN_USAGE)
+
+
+def default_wallet_costs():
+    return deepcopy(WALLET_COSTS)
+
+
+def default_image_defaults():
+    return deepcopy(IMAGE_GENERATION_DEFAULTS)
+
+
+def default_image_wallet_costs():
+    return deepcopy(IMAGE_WALLET_COSTS)
+
+
+class AIConfiguration(models.Model):
+    """Singleton, admin-managed overrides for all AI and wallet settings."""
+
+    usd_to_irt = models.PositiveIntegerField(default=180_000, verbose_name="نرخ دلار به تومان")
+    profit_multiplier = models.DecimalField(
+        max_digits=5, decimal_places=2, default=1.6, verbose_name="ضریب سود و اطمینان"
+    )
+    minimum_operation_cost = models.PositiveIntegerField(
+        default=25, verbose_name="حداقل هزینه هر عملیات (تومان)"
+    )
+    ai_models = models.JSONField(default=default_ai_models, verbose_name="مدل‌ها")
+    model_pricing_usd = models.JSONField(default=default_model_pricing, verbose_name="قیمت خام مدل‌ها (دلار)")
+    estimated_token_usage = models.JSONField(default=default_token_usage, verbose_name="مصرف تخمینی توکن")
+    wallet_costs = models.JSONField(default=default_wallet_costs, verbose_name="هزینه‌های کیف پول (تومان)")
+    image_defaults = models.JSONField(default=default_image_defaults, verbose_name="تنظیمات پیش‌فرض تصویر")
+    image_wallet_costs = models.JSONField(default=default_image_wallet_costs, verbose_name="هزینه کیفیت‌های تصویر")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "تنظیمات هوش مصنوعی"
+        verbose_name_plural = "تنظیمات هوش مصنوعی"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return "تنظیمات مرکزی هوش مصنوعی"
 
 
 class GenerationBatch(models.Model):

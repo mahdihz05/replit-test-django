@@ -14,11 +14,13 @@ class BotsConfig(AppConfig):
         run_main = os.environ.get('RUN_MAIN')
         if run_main is not None and run_main != 'true':
             return
-        try:
-            from .telegram_bot import start_bot
-            start_bot()
-        except Exception as e:
-            logger.exception(f'[Bots] Could not start Telegram bot: {e}')
+        from django.conf import settings
+        if getattr(settings, 'TELEGRAM_POLLING_ENABLED', True):
+            try:
+                from .telegram_bot import start_bot
+                start_bot()
+            except Exception as e:
+                logger.exception(f'[Bots] Could not start Telegram bot: {e}')
 
         try:
             from .bale_bot import start_bale_bot

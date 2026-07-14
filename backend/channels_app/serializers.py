@@ -18,8 +18,9 @@ class ChannelVerificationSerializer(serializers.ModelSerializer):
 class LinkedInConnectionSerializer(serializers.ModelSerializer):
     class Meta:
         model = LinkedInConnection
-        fields = ['id', 'platform_target', 'person_urn', 'organization_urn', 'status',
-                  'access_token_expires_at', 'refresh_token_expires_at', 'connected_at', 'is_active']
+        fields = ['id', 'platform_target', 'person_urn', 'organization_urn', 'name',
+                  'email', 'avatar_url', 'scopes', 'status', 'access_token_expires_at',
+                  'refresh_token_expires_at', 'connected_at', 'disconnected_at', 'is_active']
 
 
 class WordPressConnectionSerializer(serializers.ModelSerializer):

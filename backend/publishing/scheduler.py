@@ -1,11 +1,12 @@
 import os
 import re
-import fcntl
 import logging
+import tempfile
 import requests as req_lib
 from datetime import timedelta
 from django.utils import timezone
 from django.conf import settings
+from config.network import telegram_request
 from .publishers.linkedin import refresh_all_linkedin_tokens
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,31 @@ _lock_fd = None
 
 VERIFY_PATTERN = re.compile(r'VRF-[A-Z0-9]{8}')
 
-LOCK_FILE_PATH = '/tmp/mohtavayar_scheduler.lock'
+LOCK_FILE_PATH = os.path.join(tempfile.gettempdir(), 'mohtavayar_scheduler.lock')
+
+
+def _process_is_running(pid):
+    """Return whether a PID exists without sending it a terminating signal."""
+    if os.name == 'nt':
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information, False, pid
+        )
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        # Access denied also means that the process exists.
+        return ctypes.get_last_error() == 5
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
 
 # ─────────────────────────────────────────────
 # Bot polling — Telegram
@@ -33,7 +58,7 @@ def poll_telegram():
         # This avoids overlapping short-poll requests when network latency is high.
         long_poll_timeout = 3
         url = f'https://api.telegram.org/bot{token}/getUpdates'
-        resp = req_lib.get(url, params={
+        resp = telegram_request('GET', url, params={
             'offset': _offsets['telegram'],
             'timeout': long_poll_timeout,
             'allowed_updates': ['message', 'channel_post'],
@@ -176,7 +201,10 @@ def _api_call(platform, token, method, payload):
             base = f'https://api.telegram.org/bot{token}'
         else:
             base = f'https://tapi.bale.ai/bot{token}'
-        req_lib.post(f'{base}/{method}', json=payload, timeout=5)
+        if platform == 'telegram':
+            telegram_request('POST', f'{base}/{method}', json=payload, timeout=5)
+        else:
+            req_lib.post(f'{base}/{method}', json=payload, timeout=5)
     except Exception:
         pass
 
@@ -322,14 +350,11 @@ def _acquire_scheduler_lock():
             try:
                 with open(LOCK_FILE_PATH, 'r') as f:
                     old_pid = int(f.read().strip())
-                # If the old process is still alive, we cannot take the lock.
-                os.kill(old_pid, 0)
-                return False
-            except (ValueError, ProcessLookupError, FileNotFoundError):
+                if _process_is_running(old_pid):
+                    return False
+            except (ValueError, OSError):
                 # Stale lock file or dead process — take over.
                 pass
-            except PermissionError:
-                return False
         with open(LOCK_FILE_PATH, 'w') as f:
             f.write(str(os.getpid()))
         return True
@@ -349,14 +374,6 @@ def start_scheduler():
 
         scheduler = BackgroundScheduler()
 
-        # Bot polling via long-polling. Interval is slightly longer than the HTTP
-        # timeout so that APScheduler doesn't constantly skip overlapping instances
-        # when network latency to Telegram is high.
-        scheduler.add_job(poll_telegram, IntervalTrigger(seconds=8), id='poll_telegram',
-                          max_instances=1, coalesce=True)
-        scheduler.add_job(poll_bale, IntervalTrigger(seconds=8), id='poll_bale',
-                          max_instances=1, coalesce=True)
-
         # Publish queue — every 60 seconds
         scheduler.add_job(process_publish_queue, IntervalTrigger(minutes=1), id='publish_queue',
                           max_instances=1, coalesce=True)
@@ -364,6 +381,9 @@ def start_scheduler():
         scheduler.add_job(expire_otp_codes, IntervalTrigger(hours=1), id='expire_otp')
         scheduler.add_job(expire_verifications, IntervalTrigger(hours=1), id='expire_verifications')
         scheduler.add_job(refresh_all_linkedin_tokens, IntervalTrigger(hours=24), id='linkedin_refresh',
+                          max_instances=1, coalesce=True)
+        from communication.services.dispatch import process_communication_queue
+        scheduler.add_job(process_communication_queue, IntervalTrigger(seconds=10), id='communication_queue',
                           max_instances=1, coalesce=True)
 
         scheduler.start()

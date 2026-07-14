@@ -2,8 +2,40 @@ import os
 from datetime import timedelta
 from pathlib import Path
 import dj_database_url
+from decouple import Config, RepositoryEnv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load local development secrets from the repository's ignored .env file.
+# Explicit process environment variables always take precedence.
+_env_file = BASE_DIR.parent / '.env'
+if _env_file.exists():
+    _local_env = Config(RepositoryEnv(str(_env_file)))
+    for _name in (
+        'SECRET_KEY',
+        'DEBUG',
+        'OPENAI_API_KEY',
+        'TELEGRAM_BOT_TOKEN',
+        'TELEGRAM_POLLING_ENABLED',
+        'TELEGRAM_PROXY_URL',
+        'TELEGRAM_TRUST_ENV_PROXY',
+        'SERVE_MEDIA_FILES',
+        'LINKEDIN_CLIENT_ID',
+        'LINKEDIN_CLIENT_SECRET',
+        'LINKEDIN_REDIRECT_URI',
+        'LINKEDIN_TOKEN_ENCRYPTION_KEY',
+        'SHARED_TOKEN_ENCRYPTION_KEY',
+        'LINKEDIN_API_VERSION',
+        'LINKEDIN_ORG_ENABLED',
+        'ALLOWED_HOSTS',
+        'CORS_ALLOWED_ORIGINS',
+        'CSRF_TRUSTED_ORIGINS',
+        'SECURE_SSL_REDIRECT',
+    ):
+        if _name not in os.environ:
+            _value = _local_env(_name, default='')
+            if _value:
+                os.environ[_name] = _value
 
 _secret = os.environ.get('SECRET_KEY') or os.environ.get('SESSION_SECRET')
 if not _secret:
@@ -40,6 +72,7 @@ INSTALLED_APPS = [
     'wallet',
     'reports',
     'bots',
+    'communication',
 ]
 
 MIDDLEWARE = [
@@ -100,6 +133,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.environ.get('MEDIA_ROOT', str(BASE_DIR / 'media'))
+SERVE_MEDIA_FILES = os.environ.get('SERVE_MEDIA_FILES', 'false').lower() in ('true', '1', 'yes')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -149,20 +183,37 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False
 CSRF_USE_SESSIONS = False
 
+# OAuth starts through an authenticated API request and returns through a
+# top-level cross-site navigation. Lax preserves that callback session while
+# Secure/HttpOnly keep the session identifier out of scripts and cleartext HTTP.
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = os.environ.get(
+    'SECURE_SSL_REDIRECT', 'true' if not DEBUG else 'false'
+).lower() in ('true', '1', 'yes')
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+TELEGRAM_POLLING_ENABLED = os.environ.get('TELEGRAM_POLLING_ENABLED', 'true').lower() in ('true', '1', 'yes')
+TELEGRAM_PROXY_URL = os.environ.get('TELEGRAM_PROXY_URL', '').strip()
+TELEGRAM_TRUST_ENV_PROXY = os.environ.get('TELEGRAM_TRUST_ENV_PROXY', 'false').lower() in ('true', '1', 'yes')
+LINKEDIN_CLIENT_ID = os.environ.get('LINKEDIN_CLIENT_ID', '')
+LINKEDIN_CLIENT_SECRET = os.environ.get('LINKEDIN_CLIENT_SECRET', '')
+LINKEDIN_TOKEN_ENCRYPTION_KEY = os.environ.get('LINKEDIN_TOKEN_ENCRYPTION_KEY', '')
+SHARED_TOKEN_ENCRYPTION_KEY = os.environ.get('SHARED_TOKEN_ENCRYPTION_KEY', '')
+LINKEDIN_REDIRECT_URI = os.environ.get('LINKEDIN_REDIRECT_URI', '')
+LINKEDIN_API_VERSION = os.environ.get('LINKEDIN_API_VERSION', '202604')
+LINKEDIN_ORG_ENABLED = os.environ.get('LINKEDIN_ORG_ENABLED', 'false').lower() in ('true', '1', 'yes')
 BALE_BOT_TOKEN = os.environ.get('BALE_BOT_TOKEN', '')
 SMS_API_KEY = os.environ.get('SMS_API_KEY', '')
 SMS_SENDER = os.environ.get('SMS_SENDER', '')
 
-WALLET_COSTS = {
-    'text_generation': 10,
-    'image_generation': 25,
-    'content_rewrite': 8,
-    'title_suggestions': 3,
-    'hashtag_suggestions': 2,
-    'cta_generation': 3,
-    'ai_generate_bundle': 25,        # 2.5x text_generation
-    'ai_generate_variant_2': 16,     # 1.6x text_generation
-    'ai_generate_variant_3': 22,     # 2.2x text_generation
-}
+# Static compatibility export. Runtime code uses config.ai.get_wallet_cost so
+# admin changes take effect without modifying application logic.
+from .ai import WALLET_COSTS

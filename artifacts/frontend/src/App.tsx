@@ -23,12 +23,13 @@ import Wallet from "@/pages/wallet";
 import Reports from "@/pages/reports";
 import Members from "@/pages/members";
 import Settings from "@/pages/settings";
+import Communication from "@/pages/communication";
 
 const queryClient = new QueryClient();
 
 function Router() {
   const [location] = useLocation();
-  
+
   if (location === "/login") {
     return <Route path="/login" component={Login} />;
   }
@@ -51,6 +52,11 @@ function Router() {
         <Route path="/reports" component={Reports} />
         <Route path="/members" component={Members} />
         <Route path="/settings" component={Settings} />
+        <Route path="/communication/campaigns" component={Communication} />
+        <Route path="/communication/contacts" component={Communication} />
+        <Route path="/communication/templates" component={Communication} />
+        <Route path="/communication/providers" component={Communication} />
+        <Route path="/communication" component={Communication} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>

@@ -2,6 +2,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from config.ai import get_ai_config
 
 from workspaces.models import WorkspaceMember
 from .models import Wallet, WalletTransaction
@@ -29,11 +30,14 @@ def wallet_detail(request, workspace_id):
         wallet = Wallet.objects.create(workspace_id=workspace_id)
 
     recent_tx = WalletTransaction.objects.filter(wallet=wallet)[:5]
+    ai_config = get_ai_config()
     return Response({
         'success': True,
         'data': {
             **WalletSerializer(wallet).data,
-            'recent_transactions': WalletTransactionSerializer(recent_tx, many=True).data
+            'recent_transactions': WalletTransactionSerializer(recent_tx, many=True).data,
+            'wallet_costs': ai_config['wallet_costs'],
+            'image_defaults': ai_config['image_defaults'],
         }
     })
 

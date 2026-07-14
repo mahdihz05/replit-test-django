@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from workspaces.models import WorkspaceMember
 from wallet.models import Wallet, WalletTransaction
 from django.conf import settings
+from config.ai import get_model, get_wallet_cost
 
 from content.models import Content, ContentVersion
 from .models import AIChatSession, AIChatMessage, GenerationBatch, GeneratedItem
@@ -192,7 +193,7 @@ def send_message(request, workspace_id, session_id):
         role='assistant',
         type='text',
         body=result,
-        metadata={'tokens': tokens, 'model': 'gpt-4.1-mini'}
+        metadata={'tokens': tokens, 'model': get_model('chat')}
     )
 
     return Response({'success': True, 'data': AIChatMessageSerializer(ai_msg).data})
@@ -206,7 +207,7 @@ def generate_text(request, workspace_id):
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    cost = settings.WALLET_COSTS['text_generation']
+    cost = get_wallet_cost('text_generation')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -235,7 +236,7 @@ def generate_text(request, workspace_id):
     deduct_wallet(wallet, cost, f'تولید متن - {goal[:50]}')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -266,7 +267,7 @@ def generate_image_view(request, workspace_id):
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    cost = settings.WALLET_COSTS['image_generation']
+    cost = get_wallet_cost('image_generation')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -326,7 +327,7 @@ def rewrite_text(request, workspace_id):
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    cost = settings.WALLET_COSTS['content_rewrite']
+    cost = get_wallet_cost('content_rewrite')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -343,7 +344,7 @@ def rewrite_text(request, workspace_id):
     deduct_wallet(wallet, cost, 'بازنویسی متن')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -374,7 +375,7 @@ def suggest_titles(request, workspace_id):
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    cost = settings.WALLET_COSTS['title_suggestions']
+    cost = get_wallet_cost('title_suggestions')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -391,7 +392,7 @@ def suggest_titles(request, workspace_id):
     deduct_wallet(wallet, cost, f'پیشنهاد عنوان - {topic[:50]}')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -422,7 +423,7 @@ def suggest_hashtags(request, workspace_id):
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    cost = settings.WALLET_COSTS['hashtag_suggestions']
+    cost = get_wallet_cost('hashtag_suggestions')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -439,7 +440,7 @@ def suggest_hashtags(request, workspace_id):
     deduct_wallet(wallet, cost, f'پیشنهاد هشتگ - {topic[:50]}')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -469,7 +470,7 @@ def generate_summary(request, workspace_id):
     if not member:
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
-    cost = settings.WALLET_COSTS.get('content_rewrite', 5)
+    cost = get_wallet_cost('content_rewrite')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -483,7 +484,7 @@ def generate_summary(request, workspace_id):
     deduct_wallet(wallet, cost, 'خلاصه‌سازی متن')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -513,7 +514,7 @@ def generate_scenario(request, workspace_id):
     if not member:
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
-    cost = settings.WALLET_COSTS.get('text_generation', 10)
+    cost = get_wallet_cost('text_generation')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -528,7 +529,7 @@ def generate_scenario(request, workspace_id):
     deduct_wallet(wallet, cost, f'سناریو محتوا - {topic[:50]}')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -558,7 +559,7 @@ def generate_idea(request, workspace_id):
     if not member:
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
-    cost = settings.WALLET_COSTS.get('title_suggestions', 5)
+    cost = get_wallet_cost('title_suggestions')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -573,7 +574,7 @@ def generate_idea(request, workspace_id):
     deduct_wallet(wallet, cost, f'ایده محتوا - {niche[:50]}')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -604,7 +605,7 @@ def generate_cta(request, workspace_id):
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    cost = settings.WALLET_COSTS['cta_generation']
+    cost = get_wallet_cost('cta_generation')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -621,7 +622,7 @@ def generate_cta(request, workspace_id):
     deduct_wallet(wallet, cost, f'تولید CTA - {goal[:50]}')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             batch, item = _create_batch_and_text_item(
@@ -680,7 +681,7 @@ def generate_bundle(request, workspace_id):
         return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    cost = settings.WALLET_COSTS['ai_generate_bundle']
+    cost = get_wallet_cost('ai_generate_bundle')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -731,7 +732,7 @@ def generate_bundle(request, workspace_id):
     deduct_wallet(wallet, cost, f'بازتولید همزمان - {topic[:50]}')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             image_source = result.get('full_text') or result.get('title') or topic
@@ -776,7 +777,7 @@ def generate_multi_variant(request, workspace_id):
                         status=status.HTTP_400_BAD_REQUEST)
 
     cost_key = 'ai_generate_variant_2' if variant_count == 2 else 'ai_generate_variant_3'
-    cost = settings.WALLET_COSTS[cost_key]
+    cost = get_wallet_cost(cost_key)
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
@@ -813,7 +814,7 @@ def generate_multi_variant(request, workspace_id):
     deduct_wallet(wallet, cost, f'تولید چندگزینه‌ای {capability} - {variant_count} نسخه')
 
     if request.data.get('generate_image'):
-        image_cost = settings.WALLET_COSTS['image_generation']
+        image_cost = get_wallet_cost('image_generation')
         image_wallet, image_err = check_wallet(workspace_id, image_cost)
         if not image_err:
             image_source = batch.topic
@@ -858,7 +859,7 @@ def regenerate_image_for_item(request, workspace_id, item_id):
         return Response({'success': False, 'error': 'فقط برای نسخه‌های چندگزینه‌ای قابل تولید مجدد است', 'code': 'INVALID_TYPE'},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    cost = settings.WALLET_COSTS['image_generation']
+    cost = get_wallet_cost('image_generation')
     wallet, err = check_wallet(workspace_id, cost)
     if err:
         return Response({'success': False, 'error': err, 'code': 'INSUFFICIENT_BALANCE'},
