@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load local development secrets from the repository's ignored .env file.
 # Explicit process environment variables always take precedence.
 _env_file = BASE_DIR.parent / '.env'
-if _env_file.exists():
+if _env_file.is_file() and os.access(_env_file, os.R_OK):
     _local_env = Config(RepositoryEnv(str(_env_file)))
     for _name in (
         'SECRET_KEY',
