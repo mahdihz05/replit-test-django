@@ -103,6 +103,7 @@ export default function AiGenerate() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [costs, setCosts] = useState<Record<string, number>>(DEFAULT_COSTS);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [savingStandard, setSavingStandard] = useState(false);
 
   const wid = selectedWorkspace?.id;
 
@@ -305,10 +306,12 @@ export default function AiGenerate() {
     if (!wid || item.saved_as_draft) return;
     setSaving(prev => ({ ...prev, [item.id]: true }));
     try {
-      await apiFetch(`/workspaces/${wid}/ai/generate/items/${item.id}/save/`, {
+      const response = await apiFetch(`/workspaces/${wid}/ai/generate/items/${item.id}/save/`, {
         method: "POST",
         data: { include_image: includeImage }
       });
+      const contentId = response?.data?.content_id;
+      if (contentId) setSavedContentId(contentId);
       setItems(prev => prev.map(i => i.id === item.id ? { ...i, saved_as_draft: true } : i));
       toast({ title: "ذخیره شد", description: "محتوا در پیش‌نویس‌ها ذخیره شد" });
     } catch (error: any) {
@@ -337,10 +340,11 @@ export default function AiGenerate() {
     }
   };
 
-  const handleSaveStandard = async () => {
-    if (!result || !wid) return;
+  const handleSaveStandard = async (showSuccessToast = true): Promise<string | null> => {
+    if (!result || !wid) return null;
     const body = Array.isArray(result) ? result.join("\n") : result;
     const title = (goal || topic || niche || "محتوای تولید شده").slice(0, 100);
+    setSavingStandard(true);
     try {
       if (savedContentId) {
         // Backend already created a draft (possibly with image). Update its text instead of duplicating.
@@ -348,17 +352,35 @@ export default function AiGenerate() {
           method: "PATCH",
           data: { title, body }
         });
-        toast({ title: "به‌روزرسانی شد", description: "پیش‌نویس با متن فعلی به‌روزرسانی شد" });
+        if (showSuccessToast) {
+          toast({ title: "به‌روزرسانی شد", description: "پیش‌نویس با متن فعلی به‌روزرسانی شد" });
+        }
+        return savedContentId;
       } else {
-        await apiFetch(`/workspaces/${wid}/contents/`, {
+        const response = await apiFetch(`/workspaces/${wid}/contents/`, {
           method: "POST",
           data: { title, body, status: "draft" }
         });
-        toast({ title: "ذخیره شد", description: "محتوا در پیش‌نویس‌ها ذخیره شد" });
+        const contentId = response?.data?.id;
+        if (!contentId) throw new Error("شناسه محتوا از سرور دریافت نشد");
+        setSavedContentId(contentId);
+        if (showSuccessToast) {
+          toast({ title: "ذخیره شد", description: "محتوا در پیش‌نویس‌ها ذخیره شد" });
+        }
+        return contentId;
       }
     } catch (error: any) {
       toast({ title: "خطا", description: error.message || "خطا در ذخیره", variant: "destructive" });
+      return null;
+    } finally {
+      setSavingStandard(false);
     }
+  };
+
+  const handlePublishStandard = async () => {
+    // Persist the latest edited result before opening the in-page publisher.
+    const contentId = await handleSaveStandard(false);
+    if (contentId) setPublishOpen(true);
   };
 
   const renderStandardForm = () => {
@@ -732,14 +754,12 @@ export default function AiGenerate() {
                       {copied["standard"] ? <CheckCheck className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
                       {copied["standard"] ? "کپی شد" : "کپی"}
                     </Button>
-                    <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={handleSaveStandard}>
-                      <Save className="w-3.5 h-3.5" /> {savedContentId ? "به‌روزرسانی" : "ذخیره"}
+                    <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleSaveStandard()} disabled={savingStandard}>
+                      {savingStandard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} {savedContentId ? "به‌روزرسانی" : "ذخیره"}
                     </Button>
-                    {savedContentId && (
-                      <Button size="sm" className="gap-1.5 h-8" onClick={() => setPublishOpen(true)}>
-                        <Send className="w-3.5 h-3.5" /> انتشار
-                      </Button>
-                    )}
+                    <Button size="sm" className="gap-1.5 h-8" onClick={handlePublishStandard} disabled={savingStandard}>
+                      {savingStandard ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} انتشار
+                    </Button>
                   </div>
                 )}
               </div>
