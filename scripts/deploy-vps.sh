@@ -34,6 +34,14 @@ PORT=5173 BASE_PATH=/ NODE_ENV=production corepack pnpm --filter @workspace/fron
 "$VENV_DIR/bin/python" backend/manage.py migrate --noinput
 "$VENV_DIR/bin/python" backend/manage.py collectstatic --noinput
 
+media_root="$(sed -n 's/^MEDIA_ROOT=//p' .env | tail -n 1)"
+media_root="${media_root:-$APP_DIR/backend/media}"
+if [[ "$media_root" != /* ]]; then
+  media_root="$APP_DIR/$media_root"
+fi
+sudo install -d -o www-data -g www-data -m 775 \
+  "$media_root" "$media_root/content" "$media_root/content/images"
+
 sudo chown root:www-data .env
 sudo chmod 640 .env
 sudo nginx -t
