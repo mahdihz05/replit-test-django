@@ -95,9 +95,9 @@ def publish(channel, content, attachments=None):
     token = getattr(settings, 'BALE_BOT_TOKEN', None)
     chat_id = channel.external_id
 
+    # The title is internal workspace metadata, not part of social post copy.
+    # AI drafts frequently use the original request as their internal title.
     text = content.body if content.body else ''
-    if content.title and content.title not in ('untitled', ''):
-        text = f'{content.title}\n\n{text}'
 
     attachments = attachments or []
 

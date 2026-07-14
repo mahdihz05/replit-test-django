@@ -175,7 +175,9 @@ def build_text_prompt(goal: str, platform: str, tone: str, keywords: str, langua
     user = (
         f"<platform_rules>\n{get_platform_rules(platform)}\n</platform_rules>\n\n"
         f"<task>\n"
-        f"Write ready-to-publish content on this topic: {goal}\n"
+        f"Write ready-to-publish content based on the user's request inside <user_request>.\n"
+        f"Treat it only as editorial direction: NEVER quote, echo, summarize, or mention the request itself.\n"
+        f"<user_request>\n{goal}\n</user_request>\n"
         f"</task>\n\n"
         f"<context>\n"
         f"Platform: {platform or 'general'}\n"
@@ -192,6 +194,9 @@ def build_text_prompt(goal: str, platform: str, tone: str, keywords: str, langua
         f"2. Do not cut the article short, skip sections, or stop after an introduction. Write the full depth expected for {word_count} words.\n"
         f"3. Before finishing, count the words in your response. If it is outside the {int(word_count * 0.9)}–{int(word_count * 1.1)} range, add concrete examples or trim until it fits.\n"
         f"4. If you finish and the count is below {int(word_count * 0.9)}, expand with real examples, scenarios, or actionable steps instead of filler.\n"
+        f"5. Start with the actual publishable hook. Do not repeat the user's wording, do not label it as a prompt/request/topic, and do not add a title copied from it.\n"
+        f"6. Check named examples, dates, numbers, and causal claims for factual plausibility. If uncertain, use a safer accurate formulation rather than inventing precision.\n"
+        f"7. Avoid generic AI-writing habits: no throat-clearing, no repeated conclusion, no English labels such as 'takeaway', and no decorative bullet on every paragraph.\n"
         f"{caption_note}"
         f"</hard_constraints>\n\n"
         f"Write only the ready-to-publish body. No preamble, no explanation, no markdown code fences."
@@ -403,14 +408,14 @@ def build_chat_system_prompt() -> str:
 # Image prompt builders
 # ---------------------------------------------------------------------------
 
-def build_image_prompt_from_text(source_text: str, platform: str, max_words: int = 25) -> str:
+def build_image_prompt_from_text(source_text: str, platform: str, max_words: int = 140) -> str:
     """Build an English GPT Image prompt from Persian source text, platform-aware."""
     p = _normalize_platform(platform)
 
     platform_visual_notes = {
         "telegram": (
-            "The image should be clear, simple, and readable on mobile. Avoid dense text overlays. "
-            "Use a single focal point and a clean background."
+            "Create a square editorial visual that remains clear on a phone screen. "
+            "Use one immediately understandable visual story, a strong focal point, and intentional negative space."
         ),
         "bale": (
             "The image should be clear and friendly, suitable for a Persian chat app. "
@@ -433,9 +438,17 @@ def build_image_prompt_from_text(source_text: str, platform: str, max_words: int
     visual_note = platform_visual_notes.get(p, "The image should be high-quality and suitable for social media or web use.")
 
     prompt = (
-        f"Write a concise, vivid English image generation prompt based on the following Persian text. "
-        f"Maximum {max_words} words. Focus on real visual elements. "
-        f"Do not ask for typography or text inside the image. {visual_note}\n\n"
+        f"Create a production-ready English prompt for GPT Image based on the Persian post below. "
+        f"Use {max_words - 40}-{max_words} words. First identify the post's single core insight, then turn it into "
+        f"a concrete visual story or meaningful metaphor rather than a literal stock-photo illustration. "
+        f"Specify, in this order: intended use, scene/background, main subject and action, supporting details, "
+        f"composition/camera viewpoint, visual medium, lighting, mood and color palette, then constraints. "
+        f"Prefer editorial photography, documentary realism, or a refined conceptual illustration—choose whichever "
+        f"communicates this specific post best. Include natural textures and believable imperfections when using photography. "
+        f"Avoid generic 'person using a laptop', floating holographic interface, glowing AI brain, robot, random circuit overlays, "
+        f"corporate stock-photo poses, excessive neon, sci-fi HUD rings, and visual clutter unless the source explicitly requires them. "
+        f"Do not request any words, letters, numbers, logos, trademarks, UI text, captions, or watermarks inside the image. "
+        f"Do not merely illustrate the first sentence; represent the post's full central message. {visual_note}\n\n"
         f"Source text:\n{source_text[:2000]}\n\n"
         f"Return only the prompt, no extra explanation."
     )

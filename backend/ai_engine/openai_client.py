@@ -178,11 +178,12 @@ def generate_image(description, style='', platform='', enhance=True):
         return None, f'OpenAI: {openai_error} | Pollinations: {str(e)}'
 
 
-def generate_image_prompt(source_text, max_words=25, platform=''):
-    """Ask the content model to write a short English image prompt."""
+def generate_image_prompt(source_text, max_words=140, platform=''):
+    """Ask the content model for a detailed, production-oriented English image prompt."""
     system_prompt = (
-        'You are an expert image prompt engineer. Based on the text provided, '
-        'write a concise, vivid English prompt for the configured image generation model. '
+        'You are a senior editorial art director and GPT Image prompt engineer. '
+        'Translate the post into a specific visual concept with a clear narrative, not generic stock imagery. '
+        'Follow every composition and exclusion constraint in the request. '
         'Return only the prompt, no extra explanation.'
     )
     user_prompt = prompts.build_image_prompt_from_text(source_text, platform, max_words)

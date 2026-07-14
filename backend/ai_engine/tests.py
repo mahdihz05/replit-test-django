@@ -11,6 +11,7 @@ from config.ai import (
     get_wallet_cost,
 )
 from .models import AIConfiguration
+from .prompts import build_image_prompt_from_text, build_text_prompt
 
 
 class AIConfigurationTests(TestCase):
@@ -68,3 +69,24 @@ class ImageGenerationTests(TestCase):
         self.assertEqual(call['output_format'], 'png')
         self.assertEqual(call['n'], 1)
         save_image.assert_called_once_with('aW1hZ2U=')
+
+    def test_editorial_image_prompt_is_detailed_and_avoids_stock_ai_cliches(self):
+        prompt = build_image_prompt_from_text('هوشمند شدن کسب و کار با مثال کداک', 'telegram')
+
+        self.assertIn('production-ready English prompt', prompt)
+        self.assertIn('meaningful metaphor', prompt)
+        self.assertIn("person using a laptop", prompt)
+        self.assertIn('floating holographic interface', prompt)
+        self.assertIn('square editorial visual', prompt)
+        self.assertIn('no extra explanation', prompt)
+
+
+class ContentPromptQualityTests(TestCase):
+    def test_text_prompt_forbids_echoing_user_request(self):
+        request = 'ضرورت هوشمند شدن کسب و کارها را توضیح بده'
+        _, prompt = build_text_prompt(request, 'telegram', 'حرفه‌ای', '', 'fa', 300)
+
+        self.assertIn(f'<user_request>\n{request}\n</user_request>', prompt)
+        self.assertIn('NEVER quote, echo, summarize, or mention the request itself', prompt)
+        self.assertIn("Start with the actual publishable hook", prompt)
+        self.assertIn('factual plausibility', prompt)

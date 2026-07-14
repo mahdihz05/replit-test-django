@@ -179,9 +179,10 @@ def publish(channel, content, attachments=None):
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = channel.external_id
 
+    # Content.title is workspace metadata (and AI drafts often store the user's
+    # request there). The publishable Telegram copy is content.body; prepending
+    # metadata leaks the prompt into the channel and duplicates hand-written hooks.
     text = content.body or ''
-    if content.title and content.title != 'untitled':
-        text = f'<b>{content.title}</b>\n\n{text}'
 
     attachments = attachments or []
 
