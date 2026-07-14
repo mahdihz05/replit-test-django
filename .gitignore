@@ -50,6 +50,7 @@ Thumbs.db
 
 # Django media uploads (generated files, not source code)
 backend/media/
+backend/staticfiles/
 
 # Python / Django local artifacts
 __pycache__/
@@ -60,6 +61,7 @@ backend/db.sqlite3
 
 # Local runtime files
 .runtime/
+/update.sh
 
 # Environment / secret files
 .env
