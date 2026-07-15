@@ -30,9 +30,9 @@ git pull --ff-only origin main
 corepack pnpm install --frozen-lockfile
 PORT=5173 BASE_PATH=/ NODE_ENV=production corepack pnpm --filter @workspace/frontend run build
 
-"$VENV_DIR/bin/python" backend/manage.py check
-"$VENV_DIR/bin/python" backend/manage.py migrate --noinput
-"$VENV_DIR/bin/python" backend/manage.py collectstatic --noinput
+TELEGRAM_POLLING_ENABLED=false "$VENV_DIR/bin/python" backend/manage.py check
+TELEGRAM_POLLING_ENABLED=false "$VENV_DIR/bin/python" backend/manage.py migrate --noinput
+TELEGRAM_POLLING_ENABLED=false "$VENV_DIR/bin/python" backend/manage.py collectstatic --noinput
 
 media_root="$(sed -n 's/^MEDIA_ROOT=//p' .env | tail -n 1)"
 media_root="${media_root:-$APP_DIR/backend/media}"

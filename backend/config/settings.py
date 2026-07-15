@@ -14,6 +14,8 @@ if _env_file.is_file() and os.access(_env_file, os.R_OK):
     for _name in (
         'SECRET_KEY',
         'DEBUG',
+        'DATABASE_URL',
+        'MEDIA_ROOT',
         'OPENAI_API_KEY',
         'TELEGRAM_BOT_TOKEN',
         'TELEGRAM_POLLING_ENABLED',
