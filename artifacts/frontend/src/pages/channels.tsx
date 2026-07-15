@@ -69,6 +69,17 @@ function getPlatformIcon(platform: string, size = "w-5 h-5") {
   return <Share2 className={`${size} text-muted-foreground`} />;
 }
 
+interface LinkedInConfig {
+  configured: boolean;
+  credentials_configured: boolean;
+  redirect_uri: string;
+  redirect_is_https: boolean;
+  api_version: string;
+  missing: string[];
+  required_products: string[];
+  required_scopes: string[];
+}
+
 const CONNECTION_GUIDES: Record<string, { title: string; note: string; steps: string[] }> = {
   telegram: {
     title: "اتصال کانال یا گروه تلگرام",
@@ -94,10 +105,11 @@ const CONNECTION_GUIDES: Record<string, { title: string; note: string; steps: st
     title: "اتصال امن حساب LinkedIn",
     note: "ورود فقط در صفحه رسمی linkedin.com انجام می‌شود؛ رمز عبور و توکن شما هرگز به مرورگر محتوایار برنمی‌گردد.",
     steps: [
-      "در مرحله بعد «پروفایل شخصی» را انتخاب کنید.",
-      "روی اتصال بزنید تا صفحه رسمی LinkedIn در پنجره‌ای امن باز شود.",
-      "وارد LinkedIn شوید و مجوز مشاهده پروفایل و انتشار محتوا را تأیید کنید.",
-      "پس از بازگشت خودکار، حساب آماده تولید، انتشار فوری و زمان‌بندی محتواست.",
+      "در LinkedIn Developer Portal، داخل Products مطمئن شوید «Sign In with LinkedIn using OpenID Connect» و «Share on LinkedIn» فعال هستند.",
+      "در تب Auth و بخش Authorized redirect URLs، آدرس Callback نمایش‌داده‌شده در همین راهنما را دقیقاً و بدون تغییر ثبت کنید.",
+      "برای تست لوکال، برنامه را با اسکریپت HTTPS پروژه اجرا و از https://localhost:5173 باز کنید؛ HTTP معمولی localhost معتبر نیست.",
+      "پروفایل شخصی را انتخاب کنید، وارد linkedin.com شوید و مجوزهای پروفایل و انتشار را تأیید کنید.",
+      "بعد از بازگشت خودکار و بسته‌شدن پنجره، حساب در فهرست کانال‌ها آماده انتشار خواهد بود.",
     ],
   },
   wordpress: {
@@ -168,6 +180,8 @@ export default function Channels() {
 
   // LinkedIn / WordPress
   const [linkedinTarget, setLinkedinTarget] = useState<"personal" | "organization">("personal");
+  const [linkedinConfig, setLinkedinConfig] = useState<LinkedInConfig | null>(null);
+  const [linkedinConfigLoading, setLinkedinConfigLoading] = useState(false);
   const [wpSiteUrl, setWpSiteUrl] = useState("");
   const [oauthUrl, setOauthUrl] = useState<string | null>(null);
   const [checkingConnection, setCheckingConnection] = useState(false);
@@ -188,6 +202,20 @@ export default function Channels() {
     }
   };
 
+  const fetchLinkedinConfig = async () => {
+    if (!selectedWorkspace) return;
+    setLinkedinConfigLoading(true);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/linkedin/config/`);
+      setLinkedinConfig(res?.data || null);
+    } catch (e: any) {
+      setLinkedinConfig(null);
+      toast({ title: "خطا", description: e.message || "بررسی تنظیمات LinkedIn ناموفق بود", variant: "destructive" });
+    } finally {
+      setLinkedinConfigLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (selectedWorkspace) {
       setLoading(true);
@@ -195,14 +223,25 @@ export default function Channels() {
     }
   }, [selectedWorkspace]);
 
+  useEffect(() => {
+    if (showModal && platform === "linkedin" && selectedWorkspace) {
+      fetchLinkedinConfig();
+    }
+  }, [showModal, platform, selectedWorkspace?.id]);
+
   // Listen for OAuth popup messages (LinkedIn & WordPress)
   useEffect(() => {
     const handler = (event: MessageEvent) => {
       if (!event.data || typeof event.data !== "object") return;
-      // Accept messages only from the same origin as the app.
-      if (event.origin !== window.location.origin) return;
       const { platform, success, message } = event.data;
       if (!platform || (platform !== "linkedin" && platform !== "wordpress")) return;
+      const allowedOrigins = new Set([window.location.origin]);
+      if (platform === "linkedin" && linkedinConfig?.redirect_uri) {
+        try {
+          allowedOrigins.add(new URL(linkedinConfig.redirect_uri).origin);
+        } catch {}
+      }
+      if (!allowedOrigins.has(event.origin)) return;
       if (popupRef.current && !popupRef.current.closed) {
         popupRef.current.close();
       }
@@ -215,7 +254,7 @@ export default function Channels() {
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [selectedWorkspace, toast]);
+  }, [selectedWorkspace, toast, linkedinConfig?.redirect_uri]);
 
   const stopPolling = () => {
     if (pollRef.current) {
@@ -264,6 +303,8 @@ export default function Channels() {
     setVerification(null);
     setSubmitting(false);
     setLinkedinTarget("personal");
+    setLinkedinConfig(null);
+    setLinkedinConfigLoading(false);
     setWpSiteUrl("");
     setOauthUrl(null);
     setCheckingConnection(false);
@@ -498,6 +539,12 @@ export default function Channels() {
     toast({ title: "کپی شد", description: "کد تأیید کپی شد" });
   };
 
+  const copyLinkedinCallback = () => {
+    if (!linkedinConfig?.redirect_uri) return;
+    navigator.clipboard.writeText(linkedinConfig.redirect_uri);
+    toast({ title: "کپی شد", description: "آدرس Callback لینکدین کپی شد" });
+  };
+
   const isBotPlatform = platform === "telegram" || platform === "bale";
   const isLinkedIn = platform === "linkedin";
   const isWordPress = platform === "wordpress";
@@ -676,6 +723,61 @@ export default function Channels() {
                 ))}
               </div>
 
+              {platform === "linkedin" && (
+                <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-blue-950">وضعیت تنظیمات این سرور</p>
+                      <p className="mt-1 text-xs text-blue-800">
+                        هیچ Client Secret یا توکنی در این صفحه نمایش داده نمی‌شود.
+                      </p>
+                    </div>
+                    {linkedinConfigLoading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-700" />
+                    ) : linkedinConfig?.configured ? (
+                      <Badge className="bg-green-600">آماده اتصال</Badge>
+                    ) : (
+                      <Badge variant="destructive">نیازمند تنظیم</Badge>
+                    )}
+                  </div>
+
+                  {linkedinConfig?.redirect_uri ? (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-blue-950">Authorized redirect URL (عیناً ثبت شود)</Label>
+                      <div className="flex gap-2" dir="ltr">
+                        <Input value={linkedinConfig.redirect_uri} readOnly className="bg-white font-mono text-xs" />
+                        <Button type="button" variant="outline" size="icon" onClick={copyLinkedinCallback} aria-label="کپی Callback">
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    !linkedinConfigLoading && (
+                      <p className="rounded-lg bg-white p-3 text-xs text-destructive">
+                        متغیر LINKEDIN_REDIRECT_URI هنوز روی سرور تنظیم نشده است.
+                      </p>
+                    )
+                  )}
+
+                  {linkedinConfig && !linkedinConfig.configured && (
+                    <div className="space-y-1 text-xs text-destructive">
+                      {linkedinConfig.missing.length > 0 && (
+                        <p>موارد ناقص سرور: <span dir="ltr" className="font-mono">{linkedinConfig.missing.join(", ")}</span></p>
+                      )}
+                      {!linkedinConfig.redirect_is_https && linkedinConfig.redirect_uri && (
+                        <p>Callback باید HTTPS باشد؛ برای لوکال اسکریپت start-linkedin-local.ps1 را اجرا کنید.</p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="rounded-lg bg-white p-3 text-xs leading-6 text-blue-900">
+                    <p className="font-medium">تست لوکال با HTTPS توسعه</p>
+                    <p>۱) اسکریپت start-linkedin-local.ps1 را اجرا کنید. ۲) هشدار گواهی localhost را یک‌بار در مرورگر تأیید کنید. ۳) Callback نمایش‌داده‌شده را عیناً در تب Auth لینکدین ثبت کنید.</p>
+                    <p className="mt-1">نسخه API فعال: <span dir="ltr" className="font-mono">{linkedinConfig?.api_version || "—"}</span></p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-xs leading-5 text-green-800">
                 <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{CONNECTION_GUIDES[platform].note}</span>
@@ -805,13 +907,30 @@ export default function Channels() {
                 </p>
               </div>
 
+              <div className={`flex items-start gap-2 rounded-lg border p-3 text-xs leading-5 ${linkedinConfig?.configured ? "border-green-200 bg-green-50 text-green-800" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                {linkedinConfigLoading ? (
+                  <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+                ) : linkedinConfig?.configured ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                )}
+                <span>
+                  {linkedinConfigLoading
+                    ? "در حال بررسی تنظیمات سرور..."
+                    : linkedinConfig?.configured
+                      ? "تنظیمات سرور کامل است؛ Callback بالا باید عیناً در LinkedIn ثبت شده باشد."
+                      : "تنظیمات سرور کامل نیست. به راهنما برگردید تا نام دقیق متغیر ناقص یا مشکل Callback را ببینید."}
+                </span>
+              </div>
+
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" onClick={() => setStep(1)} className="flex-1">
                   برگشت
                 </Button>
                 <Button
                   onClick={handleLinkedinStart}
-                  disabled={submitting}
+                  disabled={submitting || linkedinConfigLoading || !linkedinConfig?.configured}
                   className="flex-1 gap-2"
                 >
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Linkedin className="w-4 h-4" />}

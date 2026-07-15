@@ -422,11 +422,33 @@ def channel_test(request, workspace_id, channel_id):
 # ─────────────────────────────────────────────
 
 def _linkedin_redirect_uri():
-    """Build the LinkedIn OAuth callback URL."""
-    explicit = getattr(settings, 'LINKEDIN_REDIRECT_URI', '')
-    if explicit:
-        return explicit
-    return 'https://localhost/api/auth/linkedin/callback/'
+    """Return the exact callback registered in LinkedIn Developer Portal."""
+    return getattr(settings, 'LINKEDIN_REDIRECT_URI', '').strip()
+
+
+def _linkedin_configuration():
+    """Return public configuration health without exposing OAuth credentials."""
+    redirect_uri = _linkedin_redirect_uri()
+    parsed_redirect = urlparse(redirect_uri)
+    missing = []
+    if not getattr(settings, 'LINKEDIN_CLIENT_ID', '').strip():
+        missing.append('LINKEDIN_CLIENT_ID')
+    if not getattr(settings, 'LINKEDIN_CLIENT_SECRET', '').strip():
+        missing.append('LINKEDIN_CLIENT_SECRET')
+    if not redirect_uri:
+        missing.append('LINKEDIN_REDIRECT_URI')
+
+    redirect_is_https = parsed_redirect.scheme == 'https' and bool(parsed_redirect.netloc)
+    return {
+        'configured': not missing and redirect_is_https,
+        'credentials_configured': not any(name in missing for name in ('LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET')),
+        'redirect_uri': redirect_uri,
+        'redirect_is_https': redirect_is_https,
+        'api_version': getattr(settings, 'LINKEDIN_API_VERSION', '202606'),
+        'missing': missing,
+        'required_products': ['Sign In with LinkedIn using OpenID Connect', 'Share on LinkedIn'],
+        'required_scopes': ['openid', 'profile', 'email', 'w_member_social'],
+    }
 
 
 def _state_digest(value):
@@ -441,10 +463,25 @@ def linkedin_connect_start(request, workspace_id):
         return Response({'success': False, 'error': 'فقط ادمین می‌تواند اتصال اضافه کند', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    client_id = getattr(settings, 'LINKEDIN_CLIENT_ID', '')
-    if not client_id:
-        return Response({'success': False, 'error': 'تنظیمات LinkedIn کامل نیست', 'code': 'NOT_CONFIGURED'},
+    linkedin_config = _linkedin_configuration()
+    if linkedin_config['missing']:
+        missing = '، '.join(linkedin_config['missing'])
+        return Response({
+            'success': False,
+            'error': f'تنظیمات LinkedIn در سرور کامل نیست: {missing}',
+            'code': 'NOT_CONFIGURED',
+            'data': linkedin_config,
+        },
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    if not linkedin_config['redirect_is_https']:
+        return Response({
+            'success': False,
+            'error': 'آدرس Callback لینکدین باید یک آدرس کامل HTTPS باشد',
+            'code': 'REDIRECT_URI_REQUIRES_HTTPS',
+            'data': linkedin_config,
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    client_id = getattr(settings, 'LINKEDIN_CLIENT_ID', '').strip()
 
     target = request.data.get('platform_target', 'personal')
     if target not in dict(LinkedInConnection.TARGET_CHOICES):
@@ -484,6 +521,16 @@ def linkedin_connect_start(request, workspace_id):
     }
     auth_url = f'https://www.linkedin.com/oauth/v2/authorization?{urlencode(params)}'
     return Response({'success': True, 'data': {'authorization_url': auth_url}})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def linkedin_config_status(request, workspace_id):
+    """Expose setup health and exact callback URL to workspace members."""
+    if not get_member(request.user, workspace_id):
+        return Response({'success': False, 'error': 'فضای کاری یافت نشد', 'code': 'NOT_FOUND'},
+                        status=status.HTTP_404_NOT_FOUND)
+    return Response({'success': True, 'data': _linkedin_configuration()})
 
 
 @api_view(['GET'])

@@ -53,7 +53,7 @@ class TelegramChatValidationTests(SimpleTestCase):
 @override_settings(
     LINKEDIN_CLIENT_ID='test-client',
     LINKEDIN_CLIENT_SECRET='test-secret',
-    LINKEDIN_REDIRECT_URI='http://testserver/api/auth/linkedin/callback/',
+    LINKEDIN_REDIRECT_URI='https://testserver/api/auth/linkedin/callback/',
     LINKEDIN_TOKEN_ENCRYPTION_KEY='MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=',
     CORS_ALLOWED_ORIGINS=['http://testserver'],
 )
@@ -73,6 +73,7 @@ class LinkedInOAuthTests(TestCase):
             {'platform_target': 'personal', 'origin': 'http://testserver'},
             format='json',
             HTTP_ORIGIN='http://testserver',
+            secure=True,
         )
 
     def test_start_persists_only_hashed_one_time_state(self):
@@ -88,6 +89,35 @@ class LinkedInOAuthTests(TestCase):
         self.assertNotIn('state', response.json()['data'])
         self.assertIn('w_member_social', authorization_url)
         self.assertIn('email', authorization_url)
+
+    def test_config_status_never_exposes_credentials(self):
+        response = self.client.get(
+            f'/api/workspaces/{self.workspace.id}/linkedin/config/',
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()['data']
+        self.assertTrue(data['configured'])
+        self.assertTrue(data['credentials_configured'])
+        self.assertEqual(data['redirect_uri'], 'https://testserver/api/auth/linkedin/callback/')
+        self.assertNotIn('client_id', data)
+        self.assertNotIn('client_secret', data)
+
+    @override_settings(LINKEDIN_CLIENT_SECRET='')
+    def test_start_reports_the_exact_missing_server_setting(self):
+        response = self._start()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], 'NOT_CONFIGURED')
+        self.assertIn('LINKEDIN_CLIENT_SECRET', response.json()['data']['missing'])
+
+    @override_settings(LINKEDIN_REDIRECT_URI='http://localhost:5173/api/auth/linkedin/callback/')
+    def test_start_rejects_insecure_callback(self):
+        response = self._start()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['code'], 'REDIRECT_URI_REQUIRES_HTTPS')
 
     @patch('channels_app.views.requests.get')
     @patch('channels_app.views.requests.post')
@@ -121,6 +151,7 @@ class LinkedInOAuthTests(TestCase):
         response = self.client.get(
             '/api/auth/linkedin/callback/',
             {'code': 'authorization-code', 'state': state},
+            secure=True,
         )
 
         self.assertEqual(response.status_code, 200)
@@ -135,6 +166,7 @@ class LinkedInOAuthTests(TestCase):
         replay = self.client.get(
             '/api/auth/linkedin/callback/',
             {'code': 'authorization-code', 'state': state},
+            secure=True,
         )
         self.assertContains(replay, 'SESSION_EXPIRED')
         self.assertEqual(post_request.call_count, 1)

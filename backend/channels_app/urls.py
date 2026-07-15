@@ -12,6 +12,7 @@ urlpatterns = [
     path('<uuid:workspace_id>/telegram-bot-status/', views.telegram_bot_status),
 
     # LinkedIn OAuth
+    path('<uuid:workspace_id>/linkedin/config/', views.linkedin_config_status),
     path('<uuid:workspace_id>/linkedin/connect/start/', views.linkedin_connect_start),
     path('linkedin/callback/', views.linkedin_connect_callback),
     path('<uuid:workspace_id>/linkedin/<uuid:connection_id>/disconnect/', views.linkedin_disconnect),

@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import fs from "node:fs";
 
 const rawPort = process.env.PORT;
 
@@ -25,6 +26,14 @@ if (!basePath) {
     "BASE_PATH environment variable is required but was not provided.",
   );
 }
+
+const localHttpsPfx = process.env.LOCAL_HTTPS_PFX;
+const localHttps = localHttpsPfx
+  ? {
+      pfx: fs.readFileSync(localHttpsPfx),
+      passphrase: process.env.LOCAL_HTTPS_PFX_PASSWORD || "",
+    }
+  : undefined;
 
 export default defineConfig({
   base: basePath,
@@ -59,6 +68,7 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    https: localHttps,
     port,
     strictPort: true,
     host: "0.0.0.0",
@@ -70,18 +80,22 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:8000",
         changeOrigin: true,
+        xfwd: true,
       },
       "/media": {
         target: "http://localhost:8000",
         changeOrigin: true,
+        xfwd: true,
       },
       "/admin": {
         target: "http://localhost:8000",
         changeOrigin: true,
+        xfwd: true,
       },
       "/static": {
         target: "http://localhost:8000",
         changeOrigin: true,
+        xfwd: true,
       },
     },
   },

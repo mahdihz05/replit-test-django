@@ -23,7 +23,7 @@ LINKEDIN_DOCUMENT_EXTENSIONS = {'.pdf', '.ppt', '.pptx', '.doc', '.docx'}
 def _headers(token):
     return {
         'Authorization': f'Bearer {token}',
-        'LinkedIn-Version': getattr(settings, 'LINKEDIN_API_VERSION', '202604'),
+        'LinkedIn-Version': getattr(settings, 'LINKEDIN_API_VERSION', '202606'),
         'X-Restli-Protocol-Version': RESTLI_VERSION,
         'Content-Type': 'application/json',
     }
