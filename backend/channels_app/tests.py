@@ -104,6 +104,19 @@ class LinkedInOAuthTests(TestCase):
         self.assertNotIn('client_id', data)
         self.assertNotIn('client_secret', data)
 
+    @override_settings(LINKEDIN_REDIRECT_URI='')
+    def test_https_callback_is_derived_when_server_setting_is_omitted(self):
+        response = self.client.get(
+            f'/api/workspaces/{self.workspace.id}/linkedin/config/',
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()['data']
+        self.assertTrue(data['configured'])
+        self.assertTrue(data['redirect_is_https'])
+        self.assertEqual(data['redirect_uri'], 'https://testserver/api/auth/linkedin/callback/')
+
     @override_settings(LINKEDIN_CLIENT_SECRET='')
     def test_start_reports_the_exact_missing_server_setting(self):
         response = self._start()

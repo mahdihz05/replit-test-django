@@ -103,13 +103,12 @@ const CONNECTION_GUIDES: Record<string, { title: string; note: string; steps: st
   },
   linkedin: {
     title: "اتصال امن حساب LinkedIn",
-    note: "ورود فقط در صفحه رسمی linkedin.com انجام می‌شود؛ رمز عبور و توکن شما هرگز به مرورگر محتوایار برنمی‌گردد.",
+    note: "Client ID و Client Secret فقط یک‌بار توسط مدیر سامانه تنظیم می‌شوند و هرگز از کاربران دریافت نمی‌شوند. ورود شما فقط در صفحه رسمی linkedin.com انجام می‌شود.",
     steps: [
-      "در LinkedIn Developer Portal، داخل Products مطمئن شوید «Sign In with LinkedIn using OpenID Connect» و «Share on LinkedIn» فعال هستند.",
-      "در تب Auth و بخش Authorized redirect URLs، آدرس Callback نمایش‌داده‌شده در همین راهنما را دقیقاً و بدون تغییر ثبت کنید.",
-      "برای تست لوکال، برنامه را با اسکریپت HTTPS پروژه اجرا و از https://localhost:5173 باز کنید؛ HTTP معمولی localhost معتبر نیست.",
-      "پروفایل شخصی را انتخاب کنید، وارد linkedin.com شوید و مجوزهای پروفایل و انتشار را تأیید کنید.",
-      "بعد از بازگشت خودکار و بسته‌شدن پنجره، حساب در فهرست کانال‌ها آماده انتشار خواهد بود.",
+      "مدیر محتوایار یک LinkedIn App مرکزی را یک‌بار برای کل سامانه فعال می‌کند؛ کاربران نیازی به ساخت Developer App ندارند.",
+      "پروفایل شخصی را انتخاب کنید و روی «اتصال به LinkedIn» بزنید.",
+      "در صفحه رسمی linkedin.com وارد حساب خود شوید و مجوز پروفایل و انتشار را تأیید کنید.",
+      "LinkedIn شما را به محتوایار برمی‌گرداند و حساب به‌صورت رمزنگاری‌شده به همین فضای کاری متصل می‌شود.",
     ],
   },
   wordpress: {
@@ -761,8 +760,8 @@ export default function Channels() {
 
                   {linkedinConfig && !linkedinConfig.configured && (
                     <div className="space-y-1 text-xs text-destructive">
-                      {linkedinConfig.missing.length > 0 && (
-                        <p>موارد ناقص سرور: <span dir="ltr" className="font-mono">{linkedinConfig.missing.join(", ")}</span></p>
+                      {!linkedinConfig.credentials_configured && (
+                        <p>اتصال LinkedIn هنوز توسط مدیر سامانه فعال نشده است؛ کاربران نباید Client Secret شخصی وارد کنند.</p>
                       )}
                       {!linkedinConfig.redirect_is_https && linkedinConfig.redirect_uri && (
                         <p>Callback باید HTTPS باشد؛ برای لوکال اسکریپت start-linkedin-local.ps1 را اجرا کنید.</p>
@@ -920,7 +919,7 @@ export default function Channels() {
                     ? "در حال بررسی تنظیمات سرور..."
                     : linkedinConfig?.configured
                       ? "تنظیمات سرور کامل است؛ Callback بالا باید عیناً در LinkedIn ثبت شده باشد."
-                      : "تنظیمات سرور کامل نیست. به راهنما برگردید تا نام دقیق متغیر ناقص یا مشکل Callback را ببینید."}
+                      : "اتصال LinkedIn هنوز توسط مدیر سامانه فعال نشده است؛ نیازی نیست شما Client ID یا Client Secret وارد کنید."}
                 </span>
               </div>
 

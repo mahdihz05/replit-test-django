@@ -421,14 +421,19 @@ def channel_test(request, workspace_id, channel_id):
 # LinkedIn OAuth
 # ─────────────────────────────────────────────
 
-def _linkedin_redirect_uri():
-    """Return the exact callback registered in LinkedIn Developer Portal."""
-    return getattr(settings, 'LINKEDIN_REDIRECT_URI', '').strip()
+def _linkedin_redirect_uri(request=None):
+    """Return the configured callback, or derive the canonical HTTPS callback."""
+    configured = getattr(settings, 'LINKEDIN_REDIRECT_URI', '').strip()
+    if configured:
+        return configured
+    if request is not None:
+        return request.build_absolute_uri('/api/auth/linkedin/callback/')
+    return ''
 
 
-def _linkedin_configuration():
+def _linkedin_configuration(request=None):
     """Return public configuration health without exposing OAuth credentials."""
-    redirect_uri = _linkedin_redirect_uri()
+    redirect_uri = _linkedin_redirect_uri(request)
     parsed_redirect = urlparse(redirect_uri)
     missing = []
     if not getattr(settings, 'LINKEDIN_CLIENT_ID', '').strip():
@@ -463,7 +468,7 @@ def linkedin_connect_start(request, workspace_id):
         return Response({'success': False, 'error': 'فقط ادمین می‌تواند اتصال اضافه کند', 'code': 'FORBIDDEN'},
                         status=status.HTTP_403_FORBIDDEN)
 
-    linkedin_config = _linkedin_configuration()
+    linkedin_config = _linkedin_configuration(request)
     if linkedin_config['missing']:
         missing = '، '.join(linkedin_config['missing'])
         return Response({
@@ -511,7 +516,7 @@ def linkedin_connect_start(request, workspace_id):
     )
 
     scope = 'openid profile email w_member_social'
-    redirect_uri = _linkedin_redirect_uri()
+    redirect_uri = _linkedin_redirect_uri(request)
     params = {
         'response_type': 'code',
         'client_id': client_id,
@@ -530,7 +535,7 @@ def linkedin_config_status(request, workspace_id):
     if not get_member(request.user, workspace_id):
         return Response({'success': False, 'error': 'فضای کاری یافت نشد', 'code': 'NOT_FOUND'},
                         status=status.HTTP_404_NOT_FOUND)
-    return Response({'success': True, 'data': _linkedin_configuration()})
+    return Response({'success': True, 'data': _linkedin_configuration(request)})
 
 
 @api_view(['GET'])
@@ -577,7 +582,7 @@ def linkedin_connect_callback(request):
     if not client_id or not client_secret:
         return _oauth_callback_html(False, 'تنظیمات LinkedIn کامل نیست', 'linkedin', origin)
 
-    redirect_uri = _linkedin_redirect_uri()
+    redirect_uri = _linkedin_redirect_uri(request)
 
     try:
         token_resp = requests.post(
