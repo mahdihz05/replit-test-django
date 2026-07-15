@@ -85,10 +85,11 @@ const CONNECTION_GUIDES: Record<string, { title: string; note: string; steps: st
     title: "اتصال کانال یا گروه تلگرام",
     note: "رمز یا کد ورود تلگرام شما در هیچ مرحله‌ای از شما خواسته نمی‌شود.",
     steps: [
-      "ربات محتوایار را به کانال یا گروه خود اضافه کنید.",
-      "ربات را ادمین کنید و مجوز ارسال پیام را فعال نگه دارید.",
-      "شناسه عمومی @username یا chat_id کانال را در مرحله بعد وارد کنید.",
-      "سامانه دسترسی ربات را بررسی و کانال را همان لحظه فعال می‌کند.",
+      "در تلگرام ربات @abrit_content_bot را باز کنید و آن را به کانال یا گروه موردنظر اضافه کنید.",
+      "ربات @abrit_content_bot را Administrator کنید و حتماً مجوز Post Messages (ارسال پیام) را فعال نگه دارید.",
+      "به محتوایار برگردید و نام نمایشی کانال و یکی از دو مقدار @username عمومی یا chat_id عددی کانال را وارد کنید.",
+      "روی «ادامه» بزنید؛ سامانه ادمین‌بودن ربات و مجوز ارسال پیام را مستقیماً از تلگرام بررسی می‌کند.",
+      "پس از تأیید موفق، کانال به فهرست کانال‌های انتشار اضافه و برای ارسال محتوا آماده می‌شود.",
     ],
   },
   bale: {
@@ -544,6 +545,11 @@ export default function Channels() {
     toast({ title: "کپی شد", description: "آدرس Callback لینکدین کپی شد" });
   };
 
+  const copyTelegramBotUsername = () => {
+    navigator.clipboard.writeText("@abrit_content_bot");
+    toast({ title: "کپی شد", description: "شناسه ربات تلگرام کپی شد" });
+  };
+
   const isBotPlatform = platform === "telegram" || platform === "bale";
   const isLinkedIn = platform === "linkedin";
   const isWordPress = platform === "wordpress";
@@ -722,6 +728,40 @@ export default function Channels() {
                 ))}
               </div>
 
+              {platform === "telegram" && (
+                <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+                      <Send className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-blue-950">ربات رسمی محتوایار در تلگرام</p>
+                      <p className="mt-1 text-xs leading-5 text-blue-800">
+                        فقط همین ربات را به کانال اضافه و Administrator کنید.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2" dir="ltr">
+                    <Input value="@abrit_content_bot" readOnly className="bg-white font-mono font-semibold text-blue-900" />
+                    <Button type="button" variant="outline" size="icon" onClick={copyTelegramBotUsername} aria-label="کپی شناسه ربات">
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <Button asChild type="button" variant="outline" className="w-full gap-2 border-blue-300 bg-white text-blue-800 hover:bg-blue-100">
+                    <a href="https://t.me/abrit_content_bot" target="_blank" rel="noreferrer">
+                      <Send className="h-4 w-4" />
+                      باز کردن ربات در تلگرام
+                    </a>
+                  </Button>
+
+                  <div className="rounded-lg bg-white p-3 text-xs leading-6 text-blue-900">
+                    <p><strong>مجوز ضروری:</strong> پس از افزودن ربات، در تنظیمات Administrators کانال گزینه ارسال پیام یا <span dir="ltr">Post Messages</span> را فعال کنید؛ بدون این مجوز تأیید انجام نمی‌شود.</p>
+                  </div>
+                </div>
+              )}
+
               {platform === "linkedin" && (
                 <div className="space-y-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
                   <div className="flex items-center justify-between gap-3">
@@ -837,7 +877,7 @@ export default function Channels() {
                   <div>
                     <Label>شناسه کانال تلگرام</Label>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      ربات @{botStatus?.bot?.username || "abrit_content_bot"} را ادمین کنید، سپس یکی از موارد زیر را وارد کنید.
+                      ربات <span dir="ltr" className="font-semibold">@abrit_content_bot</span> را اضافه و ادمین کنید، سپس یکی از موارد زیر را وارد کنید.
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
