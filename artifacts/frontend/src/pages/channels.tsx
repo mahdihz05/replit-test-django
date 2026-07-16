@@ -236,6 +236,12 @@ export default function Channels() {
     }
   }, [showModal, platform, selectedWorkspace?.id]);
 
+  useEffect(() => {
+    if (showModal && platform === "telegram" && selectedWorkspace) {
+      checkBotStatus();
+    }
+  }, [showModal, platform, selectedWorkspace?.id]);
+
   // Listen for OAuth popup messages (LinkedIn & WordPress)
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -570,8 +576,14 @@ export default function Channels() {
     toast({ title: "کپی شد", description: "آدرس Callback لینکدین کپی شد" });
   };
 
+  const telegramBotUsername = botStatus?.ok && botStatus.bot?.username
+    ? `@${botStatus.bot.username}`
+    : "@abrit_cloud_bot";
+  const telegramBotUrl = `https://t.me/${telegramBotUsername.replace("@", "")}`;
+  const formatTelegramGuideText = (text: string) => text.replaceAll("@abrit_cloud_bot", telegramBotUsername);
+
   const copyTelegramBotUsername = () => {
-    navigator.clipboard.writeText("@abrit_cloud_bot");
+    navigator.clipboard.writeText(telegramBotUsername);
     toast({ title: "کپی شد", description: "شناسه ربات تلگرام کپی شد" });
   };
 
@@ -763,7 +775,7 @@ export default function Channels() {
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
                       {index + 1}
                     </span>
-                    <p className="pt-0.5 text-sm leading-6">{item}</p>
+                    <p className="pt-0.5 text-sm leading-6">{platform === "telegram" ? formatTelegramGuideText(item) : item}</p>
                   </div>
                 ))}
               </div>
@@ -783,14 +795,14 @@ export default function Channels() {
                   </div>
 
                   <div className="flex gap-2" dir="ltr">
-                    <Input value="@abrit_cloud_bot" readOnly className="bg-white font-mono font-semibold text-blue-900" />
+                    <Input value={telegramBotUsername} readOnly className="bg-white font-mono font-semibold text-blue-900" />
                     <Button type="button" variant="outline" size="icon" onClick={copyTelegramBotUsername} aria-label="کپی شناسه ربات">
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
 
                   <Button asChild type="button" variant="outline" className="w-full gap-2 border-blue-300 bg-white text-blue-800 hover:bg-blue-100">
-                    <a href="https://t.me/abrit_cloud_bot" target="_blank" rel="noreferrer">
+                    <a href={telegramBotUrl} target="_blank" rel="noreferrer">
                       <Send className="h-4 w-4" />
                       باز کردن ربات در تلگرام
                     </a>
@@ -917,7 +929,7 @@ export default function Channels() {
                   <div>
                     <Label>شناسه کانال تلگرام</Label>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      ربات <span dir="ltr" className="font-semibold">@abrit_cloud_bot</span> را اضافه و ادمین کنید، سپس یکی از موارد زیر را وارد کنید.
+                      ربات <span dir="ltr" className="font-semibold">{telegramBotUsername}</span> را اضافه و ادمین کنید، سپس یکی از موارد زیر را وارد کنید.
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-2">

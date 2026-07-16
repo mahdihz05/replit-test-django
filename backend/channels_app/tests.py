@@ -40,6 +40,20 @@ class TelegramChatValidationTests(SimpleTestCase):
         self.assertTrue(error)
 
     @patch('publishing.publishers.telegram._call')
+    def test_reports_missing_bot_membership_as_not_admin(self, telegram_call):
+        telegram_call.side_effect = [
+            ({'id': -100123, 'type': 'channel', 'title': 'News'}, None),
+            ({'id': 42, 'username': 'content_bot'}, None),
+            (None, 'Bad Request: user not found'),
+        ]
+
+        chat, error, code = _validate_telegram_chat('token', '@news', 'channel')
+
+        self.assertIsNone(chat)
+        self.assertEqual(code, 'BOT_NOT_ADMIN')
+        self.assertIn('ادمین', error)
+
+    @patch('publishing.publishers.telegram._call')
     def test_rejects_chat_type_mismatch(self, telegram_call):
         telegram_call.return_value = ({'id': -100123, 'type': 'supergroup'}, None)
 

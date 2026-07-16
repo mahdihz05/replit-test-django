@@ -229,6 +229,9 @@ def _validate_telegram_chat(bot_token, lookup, expected_type):
         'user_id': bot['id'],
     })
     if error or not membership:
+        error_text = str(error or '').lower()
+        if any(part in error_text for part in ('user not found', 'participant_id_invalid', 'member not found')):
+            return None, 'ابتدا همین ربات نمایش‌داده‌شده را به‌عنوان ادمین کانال یا گروه اضافه کنید.', 'BOT_NOT_ADMIN'
         return None, 'عضویت ربات در کانال قابل بررسی نیست.', 'MEMBERSHIP_CHECK_FAILED'
 
     if membership.get('status') not in ('administrator', 'creator'):
