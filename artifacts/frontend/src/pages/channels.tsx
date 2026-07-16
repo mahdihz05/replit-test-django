@@ -91,8 +91,8 @@ const CONNECTION_GUIDES: Record<string, { title: string; note: string; steps: st
     title: "اتصال کانال یا گروه تلگرام",
     note: "رمز یا کد ورود تلگرام شما در هیچ مرحله‌ای از شما خواسته نمی‌شود.",
     steps: [
-      "در تلگرام ربات @abrit_content_bot را باز کنید و آن را به کانال یا گروه موردنظر اضافه کنید.",
-      "ربات @abrit_content_bot را Administrator کنید و حتماً مجوز Post Messages (ارسال پیام) را فعال نگه دارید.",
+      "در تلگرام ربات @abrit_cloud_bot را باز کنید و آن را به کانال یا گروه موردنظر اضافه کنید.",
+      "ربات @abrit_cloud_bot را Administrator کنید و حتماً مجوز Post Messages (ارسال پیام) را فعال نگه دارید.",
       "به محتوایار برگردید و نام نمایشی کانال و یکی از دو مقدار @username عمومی یا chat_id عددی کانال را وارد کنید.",
       "روی «ادامه» بزنید؛ سامانه ادمین‌بودن ربات و مجوز ارسال پیام را مستقیماً از تلگرام بررسی می‌کند.",
       "پس از تأیید موفق، کانال به فهرست کانال‌های انتشار اضافه و برای ارسال محتوا آماده می‌شود.",
@@ -571,7 +571,7 @@ export default function Channels() {
   };
 
   const copyTelegramBotUsername = () => {
-    navigator.clipboard.writeText("@abrit_content_bot");
+    navigator.clipboard.writeText("@abrit_cloud_bot");
     toast({ title: "کپی شد", description: "شناسه ربات تلگرام کپی شد" });
   };
 
@@ -783,14 +783,14 @@ export default function Channels() {
                   </div>
 
                   <div className="flex gap-2" dir="ltr">
-                    <Input value="@abrit_content_bot" readOnly className="bg-white font-mono font-semibold text-blue-900" />
+                    <Input value="@abrit_cloud_bot" readOnly className="bg-white font-mono font-semibold text-blue-900" />
                     <Button type="button" variant="outline" size="icon" onClick={copyTelegramBotUsername} aria-label="کپی شناسه ربات">
                       <Copy className="h-4 w-4" />
                     </Button>
                   </div>
 
                   <Button asChild type="button" variant="outline" className="w-full gap-2 border-blue-300 bg-white text-blue-800 hover:bg-blue-100">
-                    <a href="https://t.me/abrit_content_bot" target="_blank" rel="noreferrer">
+                    <a href="https://t.me/abrit_cloud_bot" target="_blank" rel="noreferrer">
                       <Send className="h-4 w-4" />
                       باز کردن ربات در تلگرام
                     </a>
@@ -917,7 +917,7 @@ export default function Channels() {
                   <div>
                     <Label>شناسه کانال تلگرام</Label>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      ربات <span dir="ltr" className="font-semibold">@abrit_content_bot</span> را اضافه و ادمین کنید، سپس یکی از موارد زیر را وارد کنید.
+                      ربات <span dir="ltr" className="font-semibold">@abrit_cloud_bot</span> را اضافه و ادمین کنید، سپس یکی از موارد زیر را وارد کنید.
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
