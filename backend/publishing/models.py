@@ -57,6 +57,7 @@ class PublishJob(models.Model):
     attempt_count = models.IntegerField(default=0)
     max_attempts = models.IntegerField(default=3)
     next_retry_at = models.DateTimeField(null=True, blank=True)
+    platform_options = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     attachments = models.ManyToManyField(
         PublishAttachment,

@@ -406,6 +406,18 @@ def channel_test(request, workspace_id, channel_id):
         from publishing.publishers.bale import send_message
         token = getattr(settings, 'BALE_BOT_TOKEN', None)
         result, err = send_message(token, channel.external_id, test_text)
+    elif channel.platform == 'wordpress':
+        connection_id = (channel.extra_data or {}).get('connection_id')
+        connection = WordPressConnection.objects.filter(
+            id=connection_id, workspace_id=workspace_id, is_active=True
+        ).first()
+        if not connection or not wp_publisher.validate_credentials(connection):
+            if connection:
+                connection.status = 'invalid'
+                connection.save(update_fields=['status'])
+            return Response({'success': False, 'error': 'اتصال وردپرس معتبر نیست؛ سایت را دوباره متصل کنید.', 'code': 'AUTH_ERROR'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': True, 'data': {'message': 'اتصال وردپرس سالم و آماده انتشار است'}})
     else:
         return Response({'success': False, 'error': 'این پلتفرم از تست پشتیبانی نمی‌کند', 'code': 'UNSUPPORTED'},
                         status=status.HTTP_400_BAD_REQUEST)
@@ -719,6 +731,58 @@ def _wordpress_authorize_url(site_url, app_name, app_id, success_url, reject_url
     return f'{base}?{urlencode(params)}'
 
 
+def _sync_wordpress_capabilities(connection):
+    ok, error_type, result = wp_publisher.discover_capabilities(connection)
+    if not ok:
+        if error_type == 'auth_error':
+            connection.status = 'invalid'
+            connection.save(update_fields=['status'])
+        return False, result
+    connection.site_name = result['site_name']
+    connection.capabilities = result['capabilities']
+    connection.capabilities_synced_at = timezone.now()
+    connection.status = 'active'
+    connection.save(update_fields=['site_name', 'capabilities', 'capabilities_synced_at', 'status'])
+    return True, result
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def wordpress_capabilities(request, workspace_id, channel_id):
+    member = get_member(request.user, workspace_id)
+    if not member:
+        return Response({'success': False, 'error': 'دسترسی ندارید', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+    if request.method == 'POST' and member.role != 'admin':
+        return Response({'success': False, 'error': 'فقط ادمین می‌تواند اطلاعات سایت را به‌روزرسانی کند', 'code': 'FORBIDDEN'},
+                        status=status.HTTP_403_FORBIDDEN)
+    channel = PublishChannel.objects.filter(
+        id=channel_id, workspace_id=workspace_id, platform='wordpress', is_active=True
+    ).first()
+    if not channel:
+        return Response({'success': False, 'error': 'سایت وردپرس یافت نشد', 'code': 'NOT_FOUND'},
+                        status=status.HTTP_404_NOT_FOUND)
+    connection_id = (channel.extra_data or {}).get('connection_id')
+    connection = WordPressConnection.objects.filter(id=connection_id, workspace_id=workspace_id, is_active=True).first()
+    if not connection:
+        return Response({'success': False, 'error': 'اتصال وردپرس یافت نشد', 'code': 'NOT_FOUND'},
+                        status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'POST' or not connection.capabilities:
+        ok, result = _sync_wordpress_capabilities(connection)
+        if not ok:
+            return Response({'success': False, 'error': result, 'code': 'WORDPRESS_SYNC_FAILED'},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        channel.name = connection.site_name or channel.name
+        channel.save(update_fields=['name'])
+    return Response({'success': True, 'data': {
+        'status': connection.status,
+        'site_name': connection.site_name or channel.name,
+        'site_url': connection.site_url,
+        'capabilities': connection.capabilities or {},
+        'synced_at': connection.capabilities_synced_at,
+    }})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def wordpress_connect_start(request, workspace_id):
@@ -814,12 +878,14 @@ def wordpress_connect_callback(request, workspace_id):
             conn.save(update_fields=['status'])
             return _oauth_callback_html(False, 'اعتبارنامه وردپرس معتبر نیست', 'wordpress', origin)
 
+        _sync_wordpress_capabilities(conn)
+
         PublishChannel.objects.update_or_create(
             workspace_id=workspace_id,
             platform='wordpress',
             external_id=site_url,
             defaults={
-                'name': f'WordPress — {conn.site_url}',
+                'name': conn.site_name or f'WordPress — {conn.site_url}',
                 'channel_type': 'site',
                 'is_verified': True,
                 'is_active': True,

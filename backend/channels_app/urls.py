@@ -21,4 +21,5 @@ urlpatterns = [
     path('<uuid:workspace_id>/wordpress/connect/start/', views.wordpress_connect_start),
     path('<uuid:workspace_id>/wordpress/callback/', views.wordpress_connect_callback),
     path('<uuid:workspace_id>/wordpress/<uuid:connection_id>/disconnect/', views.wordpress_disconnect),
+    path('<uuid:workspace_id>/channels/<uuid:channel_id>/wordpress/capabilities/', views.wordpress_capabilities),
 ]

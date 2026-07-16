@@ -31,6 +31,12 @@ interface Channel {
   is_active: boolean;
   created_at: string;
   extra_data?: Record<string, any>;
+  wordpress?: {
+    status: "active" | "invalid" | "disconnected";
+    site_name?: string;
+    synced_at?: string | null;
+    capabilities?: { post_types?: { slug: string; name: string }[] };
+  } | null;
 }
 
 interface VerificationData {
@@ -116,10 +122,10 @@ const CONNECTION_GUIDES: Record<string, { title: string; note: string; steps: st
     title: "اتصال سایت WordPress",
     note: "برای امنیت بیشتر از Application Password استفاده می‌شود و رمز اصلی وردپرس لازم نیست.",
     steps: [
-      "آدرس کامل سایت وردپرسی را وارد کنید.",
-      "در وردپرس یک Application Password مخصوص محتوایار بسازید.",
-      "مجوز اتصال را در صفحه سایت خود تأیید کنید.",
-      "پس از بازگشت، انتشار نوشته و تصویر برای سایت فعال می‌شود.",
+      "آدرس کامل و HTTPS سایت وردپرسی را وارد کنید.",
+      "روی «دریافت مجوز» بزنید تا صفحه امن wp-admin همان سایت باز شود.",
+      "در وردپرس وارد شوید و ساخت Application Password مخصوص محتوایار را تأیید کنید؛ رمز اصلی شما دریافت نمی‌شود.",
+      "پس از بازگشت خودکار، نوع‌های محتوا و دسته‌بندی‌های سایت دریافت و انتشار آماده می‌شود.",
     ],
   },
 };
@@ -163,6 +169,7 @@ export default function Channels() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null);
 
@@ -539,6 +546,24 @@ export default function Channels() {
     toast({ title: "کپی شد", description: "کد تأیید کپی شد" });
   };
 
+  const handleWordpressSync = async (channel: Channel) => {
+    if (!selectedWorkspace) return;
+    setSyncingId(channel.id);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/channels/${channel.id}/wordpress/capabilities/`, {
+        method: "POST",
+      });
+      setChannels(prev => prev.map(item => item.id === channel.id
+        ? { ...item, name: res.data.site_name || item.name, wordpress: { ...(item.wordpress || { status: "active" }), ...res.data } }
+        : item));
+      toast({ title: "اطلاعات وردپرس به‌روز شد", description: "نوع‌های محتوا و طبقه‌بندی‌ها دوباره دریافت شدند" });
+    } catch (e: any) {
+      toast({ title: "به‌روزرسانی ناموفق", description: e.message || "اتصال سایت را بررسی کنید", variant: "destructive" });
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
   const copyLinkedinCallback = () => {
     if (!linkedinConfig?.redirect_uri) return;
     navigator.clipboard.writeText(linkedinConfig.redirect_uri);
@@ -623,6 +648,9 @@ export default function Channels() {
                   >
                     {channel.is_verified ? "تأیید شده" : "در انتظار تأیید"}
                   </Badge>
+                  {channel.platform === "wordpress" && channel.wordpress?.status === "invalid" && (
+                    <Badge variant="destructive" className="text-xs">نیازمند اتصال مجدد</Badge>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
@@ -632,8 +660,13 @@ export default function Channels() {
                 {channel.external_id && channel.platform === "wordpress" && (
                   <p className="text-xs text-muted-foreground mb-3 dir-ltr text-right">{channel.external_id}</p>
                 )}
+                {channel.platform === "wordpress" && channel.wordpress?.synced_at && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    آخرین به‌روزرسانی: {new Date(channel.wordpress.synced_at).toLocaleString("fa-IR")}
+                  </p>
+                )}
                 <div className="flex items-center gap-2 flex-wrap">
-                  {channel.is_verified && (channel.platform === "telegram" || channel.platform === "bale") && (
+                  {channel.is_verified && (channel.platform === "telegram" || channel.platform === "bale" || channel.platform === "wordpress") && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -646,7 +679,14 @@ export default function Channels() {
                       ) : (
                         <Zap className="w-3 h-3" />
                       )}
-                      تست اتصال
+                      {channel.platform === "wordpress" ? "بررسی اتصال" : "تست اتصال"}
+                    </Button>
+                  )}
+                  {channel.platform === "wordpress" && channel.is_verified && (
+                    <Button variant="outline" size="sm" className="gap-1.5 text-xs"
+                      onClick={() => handleWordpressSync(channel)} disabled={syncingId === channel.id}>
+                      <RefreshCw className={`w-3 h-3 ${syncingId === channel.id ? "animate-spin" : ""}`} />
+                      به‌روزرسانی اطلاعات
                     </Button>
                   )}
                   <Button

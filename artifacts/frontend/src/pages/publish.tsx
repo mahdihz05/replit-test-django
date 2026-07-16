@@ -21,6 +21,43 @@ interface Channel {
   name: string;
   channel_type: string;
   is_verified: boolean;
+  wordpress?: {
+    status: string;
+    site_name?: string;
+    synced_at?: string | null;
+    capabilities?: WordPressCapabilities;
+  } | null;
+}
+
+interface WordPressPostType {
+  slug: string;
+  name: string;
+  rest_base: string;
+  supports: Record<string, boolean>;
+  taxonomies: string[];
+}
+
+interface WordPressTaxonomy {
+  slug: string;
+  name: string;
+  rest_base: string;
+  hierarchical: boolean;
+  types: string[];
+  terms: { id: number; name: string; parent?: number }[];
+}
+
+interface WordPressCapabilities {
+  post_types?: WordPressPostType[];
+  taxonomies?: Record<string, WordPressTaxonomy>;
+}
+
+interface WordPressPublishOptions {
+  post_type: string;
+  status: "draft" | "pending" | "publish";
+  excerpt: string;
+  slug: string;
+  taxonomy_terms: Record<string, number[]>;
+  featured_attachment_id: string;
 }
 
 interface PublishAttachment {
@@ -51,6 +88,13 @@ interface PublishResult {
   status: "success" | "failed" | "skipped";
   error?: string;
   message_id?: string;
+  wordpress?: {
+    post_id?: number;
+    url?: string;
+    edit_url?: string;
+    status?: string;
+    post_type?: string;
+  };
 }
 
 const PLATFORM_NAMES: Record<string, string> = {
@@ -130,6 +174,8 @@ export default function Publish() {
   const [customText, setCustomText] = useState("");
 
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
+  const [wordpressOptions, setWordpressOptions] = useState<Record<string, WordPressPublishOptions>>({});
+  const [loadingWordpress, setLoadingWordpress] = useState<string | null>(null);
   const [publishType, setPublishType] = useState<"now" | "schedule">("now");
   const [scheduledAt, setScheduledAt] = useState("");
   const [attachments, setAttachments] = useState<PublishAttachment[]>([]);
@@ -163,10 +209,53 @@ export default function Publish() {
     c.body?.toLowerCase().includes(contentSearch.toLowerCase())
   );
 
+  const defaultWordpressOptions = (channel: Channel): WordPressPublishOptions => ({
+    post_type: channel.wordpress?.capabilities?.post_types?.[0]?.slug || "post",
+    status: "draft",
+    excerpt: "",
+    slug: "",
+    taxonomy_terms: {},
+    featured_attachment_id: "",
+  });
+
+  const loadWordpressCapabilities = async (channel: Channel) => {
+    if (!selectedWorkspace || channel.platform !== "wordpress") return;
+    if (channel.wordpress?.capabilities?.post_types?.length) return;
+    setLoadingWordpress(channel.id);
+    try {
+      const res = await apiFetch(`/workspaces/${selectedWorkspace.id}/channels/${channel.id}/wordpress/capabilities/`);
+      setChannels(prev => prev.map(item => item.id === channel.id
+        ? { ...item, wordpress: { ...(item.wordpress || { status: "active" }), ...res.data } }
+        : item));
+      const firstType = res?.data?.capabilities?.post_types?.[0]?.slug || "post";
+      setWordpressOptions(prev => ({
+        ...prev,
+        [channel.id]: { ...(prev[channel.id] || defaultWordpressOptions(channel)), post_type: firstType },
+      }));
+    } catch (e: any) {
+      toast({ title: "خطا در دریافت اطلاعات وردپرس", description: e.message || "دوباره تلاش کنید", variant: "destructive" });
+    } finally {
+      setLoadingWordpress(null);
+    }
+  };
+
   const toggleChannel = (id: string) => {
-    setSelectedChannels(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
+    const channel = channels.find(item => item.id === id);
+    const selecting = !selectedChannels.includes(id);
+    setSelectedChannels(prev => selecting ? [...prev, id] : prev.filter(x => x !== id));
+    if (selecting && channel?.platform === "wordpress") {
+      setWordpressOptions(prev => ({ ...prev, [id]: prev[id] || defaultWordpressOptions(channel) }));
+      void loadWordpressCapabilities(channel);
+    }
+  };
+
+  const updateWordpressOptions = (channelId: string, patch: Partial<WordPressPublishOptions>) => {
+    const channel = channels.find(item => item.id === channelId);
+    if (!channel) return;
+    setWordpressOptions(prev => ({
+      ...prev,
+      [channelId]: { ...(prev[channelId] || defaultWordpressOptions(channel)), ...patch },
+    }));
   };
 
   const removeAttachment = (id: string) => {
@@ -229,6 +318,10 @@ export default function Publish() {
     const payload: any = {
       channel_ids: selectedChannels,
       attachments: attachments.map(a => ({ id: a.id, media_type: a.media_type })),
+      wordpress_options: Object.fromEntries(
+        selectedChannels.filter(id => channels.find(channel => channel.id === id)?.platform === "wordpress")
+          .map(id => [id, wordpressOptions[id]])
+      ),
     };
 
     if (contentTab === "saved" && selectedContent) {
@@ -302,21 +395,28 @@ export default function Publish() {
           <CardContent>
             <div className="space-y-2">
               {results.map((r, i) => (
-                <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <div className="flex items-center gap-2">
-                    {getPlatformIcon(r.platform)}
-                    <span className="font-medium text-sm">{r.channel_name}</span>
-                  </div>
-                  {r.status === "success" ? (
-                    <Badge className="gap-1 bg-green-100 text-green-800 border-green-200">
-                      <CheckCircle2 className="w-3 h-3" /> موفق
-                    </Badge>
-                  ) : (
+                <div key={i} className="p-3 rounded-lg bg-muted/50 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-destructive">{r.error}</span>
+                      {getPlatformIcon(r.platform)}
+                      <span className="font-medium text-sm">{r.channel_name}</span>
+                    </div>
+                    {r.status === "success" ? (
+                      <Badge className="gap-1 bg-green-100 text-green-800 border-green-200">
+                        <CheckCircle2 className="w-3 h-3" /> موفق
+                      </Badge>
+                    ) : (
                       <Badge className="gap-1 bg-destructive/10 text-destructive border-destructive/20">
                         <XCircle className="w-3 h-3" /> ناموفق
                       </Badge>
+                    )}
+                  </div>
+                  {r.error && <p className="text-xs text-destructive">{r.error}</p>}
+                  {r.wordpress && r.status === "success" && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="text-muted-foreground">شناسه: {r.wordpress.post_id} · {r.wordpress.status === "draft" ? "پیش‌نویس" : "ارسال‌شده"}</span>
+                      {r.wordpress.edit_url && <a className="text-primary underline" href={r.wordpress.edit_url} target="_blank" rel="noreferrer">ویرایش در وردپرس</a>}
+                      {r.wordpress.url && r.wordpress.status === "publish" && <a className="text-primary underline" href={r.wordpress.url} target="_blank" rel="noreferrer">مشاهده نوشته</a>}
                     </div>
                   )}
                 </div>
@@ -513,6 +613,147 @@ export default function Publish() {
             </CardContent>
           </Card>
 
+          {selectedChannels.map(channelId => {
+            const channel = channels.find(item => item.id === channelId);
+            if (!channel || channel.platform !== "wordpress") return null;
+            const options = wordpressOptions[channelId] || defaultWordpressOptions(channel);
+            const capabilities = channel.wordpress?.capabilities || {};
+            const postTypes = capabilities.post_types || [];
+            const selectedType = postTypes.find(item => item.slug === options.post_type) || postTypes[0];
+            const taxonomies = (selectedType?.taxonomies || [])
+              .map(slug => capabilities.taxonomies?.[slug])
+              .filter((item): item is WordPressTaxonomy => !!item);
+            const imageAttachments = attachments.filter(item => item.media_type === "image");
+            return (
+              <Card key={`wordpress-${channelId}`} className="border-blue-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-blue-600" /> تنظیمات وردپرس
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground">{channel.wordpress?.site_name || channel.name}</p>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {loadingWordpress === channelId ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="w-4 h-4 animate-spin" /> در حال دریافت تنظیمات سایت...
+                    </div>
+                  ) : postTypes.length === 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      اطلاعات نوع محتوا در دسترس نیست. از صفحه کانال‌ها «به‌روزرسانی اطلاعات» را بزنید.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor={`wp-type-${channelId}`}>نوع محتوا</Label>
+                        <select
+                          id={`wp-type-${channelId}`}
+                          value={options.post_type}
+                          onChange={event => updateWordpressOptions(channelId, {
+                            post_type: event.target.value,
+                            taxonomy_terms: {},
+                          })}
+                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        >
+                          {postTypes.map(item => <option key={item.slug} value={item.slug}>{item.name}</option>)}
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>وضعیت در وردپرس</Label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {([['draft', 'پیش‌نویس'], ['pending', 'در انتظار'], ['publish', 'انتشار']] as const).map(([value, label]) => (
+                            <button
+                              type="button"
+                              key={value}
+                              onClick={() => updateWordpressOptions(channelId, { status: value })}
+                              className={`rounded-lg border p-2 text-xs ${options.status === value ? "border-primary bg-primary/5 text-primary" : "border-border"}`}
+                            >{label}</button>
+                          ))}
+                        </div>
+                        {options.status === "draft" && <p className="text-xs text-muted-foreground">محتوا منتشر نمی‌شود و ابتدا برای بازبینی وارد وردپرس خواهد شد.</p>}
+                      </div>
+
+                      <details className="rounded-lg border p-3">
+                        <summary className="cursor-pointer text-sm font-medium">تنظیمات پیشرفته وردپرس</summary>
+                        <div className="mt-4 space-y-4">
+                          {taxonomies.map(taxonomy => (
+                            <div key={taxonomy.slug} className="space-y-2">
+                              <Label>{taxonomy.name}</Label>
+                              {taxonomy.terms.length ? (
+                                <div className="max-h-36 space-y-2 overflow-y-auto rounded-md border p-2">
+                                  {taxonomy.terms.map(term => {
+                                    const selected = options.taxonomy_terms[taxonomy.slug] || [];
+                                    return (
+                                      <label key={term.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                                        <input
+                                          type="checkbox"
+                                          checked={selected.includes(term.id)}
+                                          onChange={() => updateWordpressOptions(channelId, {
+                                            taxonomy_terms: {
+                                              ...options.taxonomy_terms,
+                                              [taxonomy.slug]: selected.includes(term.id)
+                                                ? selected.filter(id => id !== term.id)
+                                                : [...selected, term.id],
+                                            },
+                                          })}
+                                        />
+                                        <span>{term.name}</span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              ) : <p className="text-xs text-muted-foreground">موردی در سایت تعریف نشده است.</p>}
+                            </div>
+                          ))}
+
+                          {(!selectedType?.supports || selectedType.supports.excerpt) && (
+                            <div className="space-y-2">
+                              <Label htmlFor={`wp-excerpt-${channelId}`}>خلاصه</Label>
+                              <Textarea id={`wp-excerpt-${channelId}`} rows={3} value={options.excerpt}
+                                onChange={event => updateWordpressOptions(channelId, { excerpt: event.target.value })}
+                                placeholder="خلاصه کوتاه محتوا (اختیاری)" />
+                            </div>
+                          )}
+                          <div className="space-y-2">
+                            <Label htmlFor={`wp-slug-${channelId}`}>نامک</Label>
+                            <Input id={`wp-slug-${channelId}`} dir="ltr" value={options.slug}
+                              onChange={event => updateWordpressOptions(channelId, { slug: event.target.value })}
+                              placeholder="my-post-slug" />
+                          </div>
+                          {imageAttachments.length > 0 && (
+                            <div className="space-y-2">
+                              <Label htmlFor={`wp-featured-${channelId}`}>تصویر شاخص</Label>
+                              <select id={`wp-featured-${channelId}`} value={options.featured_attachment_id}
+                                onChange={event => updateWordpressOptions(channelId, { featured_attachment_id: event.target.value })}
+                                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                                <option value="">اولین تصویر ضمیمه‌شده</option>
+                                {imageAttachments.map(item => <option key={item.id} value={item.id}>{item.original_filename}</option>)}
+                              </select>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+
+                      <details className="rounded-lg bg-blue-50 p-3 text-xs text-blue-950">
+                        <summary className="cursor-pointer font-medium">راهنمای انتشار در وردپرس</summary>
+                        <ol className="mt-2 list-decimal space-y-1 pr-4 leading-6">
+                          <li>نوع محتوا و وضعیت را انتخاب کنید؛ حالت امن پیش‌فرض «پیش‌نویس» است.</li>
+                          <li>در صورت نیاز تنظیمات پیشرفته، دسته‌ها و تصویر شاخص را مشخص کنید.</li>
+                          <li>پس از ارسال، از لینک نتیجه برای بازبینی یا ویرایش در وردپرس استفاده کنید.</li>
+                        </ol>
+                      </details>
+
+                      <div className="rounded-lg bg-muted/50 p-3 text-xs leading-6">
+                        <span className="font-medium">خلاصه: </span>
+                        {channel.wordpress?.site_name || channel.name} · {selectedType?.name} · {options.status === "draft" ? "پیش‌نویس" : options.status === "pending" ? "در انتظار بررسی" : "انتشار مستقیم"}
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+
           {/* Publish Time */}
           <Card>
             <CardHeader className="pb-3">
@@ -560,7 +801,13 @@ export default function Publish() {
             {publishing ? (
               <><Loader2 className="w-5 h-5 animate-spin" /> در حال انتشار...</>
             ) : publishType === "now" ? (
-              <><Send className="w-5 h-5" /> انتشار</>
+              <><Send className="w-5 h-5" /> {
+                selectedChannels.some(id => channels.find(channel => channel.id === id)?.platform === "wordpress") &&
+                selectedChannels.filter(id => channels.find(channel => channel.id === id)?.platform === "wordpress")
+                  .every(id => (wordpressOptions[id]?.status || "draft") === "draft")
+                  ? "ارسال (وردپرس به‌صورت پیش‌نویس)"
+                  : "انتشار"
+              }</>
             ) : (
               <><Clock className="w-5 h-5" /> زمان‌بندی انتشار</>
             )}

@@ -134,7 +134,7 @@ def _get_text(content_id, custom_text, workspace_id):
     )
 
 
-def _publish_to_channel(channel, title, body, content_obj, attachments=None):
+def _publish_to_channel(channel, title, body, content_obj, attachments=None, platform_options=None):
     """Immediately publish text/media to a channel. Returns (success, error_msg, platform_msg_id)"""
     from content.models import Content
     if content_obj is None:
@@ -155,9 +155,18 @@ def _publish_to_channel(channel, title, body, content_obj, attachments=None):
         return li_pub.publish(channel, content_obj, attachments=attachments)
     elif channel.platform == 'wordpress':
         from .publishers import wordpress as wp_pub
-        return wp_pub.publish(channel, content_obj, attachments=attachments)
+        return wp_pub.publish(channel, content_obj, attachments=attachments, options=platform_options)
 
     return False, 'پلتفرم پشتیبانی نمی‌شود', None
+
+
+def _wordpress_options_for_channel(wordpress_options, channel):
+    if channel.platform != 'wordpress':
+        return {}
+    if not isinstance(wordpress_options, dict):
+        return {}
+    value = wordpress_options.get(str(channel.id), {})
+    return value if isinstance(value, dict) else {}
 
 
 @api_view(['GET'])
@@ -227,6 +236,7 @@ def publish_now(request, workspace_id):
     custom_text = request.data.get('custom_text', '').strip()
     channel_ids = request.data.get('channel_ids', [])
     attachments = request.data.get('attachments', [])
+    wordpress_options = request.data.get('wordpress_options', {})
 
     if not channel_ids:
         return Response({'success': False, 'error': 'حداقل یک کانال انتخاب کنید', 'code': 'NO_CHANNELS'},
@@ -258,7 +268,10 @@ def publish_now(request, workspace_id):
             continue
 
         ch_attachments = _filter_attachments_for_channel(channel.platform, validated_attachments)
-        success, error_type, msg_id_or_err = _publish_to_channel(channel, title, body, content_obj, ch_attachments)
+        channel_options = _wordpress_options_for_channel(wordpress_options, channel)
+        success, error_type, msg_id_or_err = _publish_to_channel(
+            channel, title, body, content_obj, ch_attachments, channel_options
+        )
 
         if success:
             any_success = True
@@ -267,11 +280,12 @@ def publish_now(request, workspace_id):
                 'channel_name': channel.name,
                 'platform': channel.platform,
                 'status': 'success',
-                'message_id': str(msg_id_or_err) if msg_id_or_err else None,
+                'message_id': str(msg_id_or_err) if msg_id_or_err and not isinstance(msg_id_or_err, dict) else None,
+                'wordpress': msg_id_or_err if channel.platform == 'wordpress' and isinstance(msg_id_or_err, dict) else None,
             })
             # Log to PublishJob if linked to a content model
             if content_obj and hasattr(content_obj, 'pk') and content_obj.pk:
-                _record_job(content_obj, channel, 'success', None)
+                _record_job(content_obj, channel, 'success', None, ch_attachments, channel_options)
         else:
             all_success = False
             error_msg = msg_id_or_err or 'خطای ناشناخته'
@@ -283,7 +297,7 @@ def publish_now(request, workspace_id):
                 'error': error_msg,
             })
             if content_obj and hasattr(content_obj, 'pk') and content_obj.pk:
-                _record_job(content_obj, channel, 'failed', error_msg)
+                _record_job(content_obj, channel, 'failed', error_msg, ch_attachments, channel_options)
 
     overall = 'published' if all_success else ('partial' if any_success else 'failed')
     return Response({'success': True, 'data': {
@@ -300,7 +314,7 @@ def _filter_attachments_for_channel(platform, attachments):
     return [a for a in attachments if a['media_type'] in supported]
 
 
-def _record_job(content_obj, channel, job_status, error_msg, attachments=None):
+def _record_job(content_obj, channel, job_status, error_msg, attachments=None, platform_options=None):
     """Create a PublishJob + PublishLog record for tracking."""
     try:
         job = PublishJob.objects.create(
@@ -310,6 +324,7 @@ def _record_job(content_obj, channel, job_status, error_msg, attachments=None):
             started_at=timezone.now(),
             completed_at=timezone.now(),
             attempt_count=1,
+            platform_options=platform_options or {},
         )
         if attachments:
             job.attachments.set([a['object'] for a in attachments if a.get('object')])
@@ -338,6 +353,7 @@ def publish_schedule(request, workspace_id):
     channel_ids = request.data.get('channel_ids', [])
     scheduled_at_str = request.data.get('scheduled_at')
     attachments = request.data.get('attachments', [])
+    wordpress_options = request.data.get('wordpress_options', {})
 
     if not channel_ids:
         return Response({'success': False, 'error': 'حداقل یک کانال انتخاب کنید', 'code': 'NO_CHANNELS'},
@@ -388,6 +404,7 @@ def publish_schedule(request, workspace_id):
             channel=channel,
             status='queued',
             scheduled_at=scheduled_at,
+            platform_options=_wordpress_options_for_channel(wordpress_options, channel),
         )
         if validated_attachments:
             ch_attachments = _filter_attachments_for_channel(channel.platform, validated_attachments)

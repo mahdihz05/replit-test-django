@@ -37,6 +37,12 @@ def _classify_error(err_text, status_code):
     err_lower = (err_text or '').lower()
     if status_code == 401 or 'unauthorized' in err_lower or 'incorrect password' in err_lower:
         return 'auth_error', 'اعتبار اتصال وردپرس نامعتبر است. لطفاً دوباره متصل شوید.'
+    if status_code == 403 or 'forbidden' in err_lower or 'rest_cannot_create' in err_lower:
+        return 'auth_error', 'کاربر وردپرس اجازه ساخت این نوع محتوا را ندارد. نقش کاربر یا دسترسی نوع محتوا را بررسی کنید.'
+    if status_code == 404 or 'rest_no_route' in err_lower:
+        return 'connection_error', 'مسیر انتشار این نوع محتوا در وردپرس در دسترس نیست. اطلاعات سایت را به‌روزرسانی کنید.'
+    if status_code == 400:
+        return 'unknown', 'وردپرس اطلاعات محتوا را نپذیرفت. عنوان، نامک و طبقه‌بندی‌ها را بررسی کنید.'
     if status_code >= 500 or 'connection' in err_lower or 'timeout' in err_lower:
         return 'connection_error', 'خطا در اتصال به سایت وردپرس. لطفاً دوباره تلاش کنید.'
     return 'unknown', f'انتشار در وردپرس با خطا مواجه شد: {err_text}'
@@ -111,7 +117,93 @@ def _embed_wordpress_media(body, media_list):
     return body + '\n\n' + '\n\n'.join(blocks) if body else '\n\n'.join(blocks)
 
 
-def publish(channel, content, attachments=None):
+def discover_capabilities(connection):
+    """Discover editable REST content types and their taxonomies without exposing credentials."""
+    try:
+        auth = _basic_auth(connection)
+        root = safe_get(f'{connection.site_url.rstrip("/")}/wp-json/', timeout=15)
+        types_resp = safe_get(_api_url(connection.site_url, 'wp/v2/types'), auth=auth,
+                              params={'context': 'edit'}, timeout=20)
+        tax_resp = safe_get(_api_url(connection.site_url, 'wp/v2/taxonomies'), auth=auth,
+                            params={'context': 'edit'}, timeout=20)
+        if not types_resp.ok:
+            error_type, message = _classify_error(types_resp.text[:300], types_resp.status_code)
+            return False, error_type, message
+
+        root_data = root.json() if root.ok else {}
+        type_data = types_resp.json()
+        tax_data = tax_resp.json() if tax_resp.ok else {}
+        excluded = {'attachment', 'wp_block', 'wp_template', 'wp_template_part', 'nav_menu_item'}
+        post_types = []
+        for slug, item in type_data.items():
+            rest_base = item.get('rest_base') or slug
+            if slug in excluded or not rest_base:
+                continue
+            post_types.append({
+                'slug': slug,
+                'name': item.get('name') or slug,
+                'rest_base': rest_base,
+                'supports': item.get('supports') or {},
+                'taxonomies': item.get('taxonomies') or [],
+            })
+
+        taxonomies = {}
+        for slug, item in tax_data.items():
+            rest_base = item.get('rest_base') or slug
+            terms = []
+            terms_resp = safe_get(_api_url(connection.site_url, f'wp/v2/{rest_base}'), auth=auth,
+                                  params={'per_page': 100, 'orderby': 'name'}, timeout=20)
+            if terms_resp.ok:
+                terms = [{'id': term.get('id'), 'name': term.get('name'), 'parent': term.get('parent', 0)}
+                         for term in terms_resp.json()]
+            taxonomies[slug] = {
+                'slug': slug,
+                'name': item.get('name') or slug,
+                'rest_base': rest_base,
+                'hierarchical': bool(item.get('hierarchical')),
+                'types': item.get('types') or [],
+                'terms': terms,
+            }
+
+        return True, None, {
+            'site_name': root_data.get('name') or connection.site_url,
+            'capabilities': {
+                'post_types': sorted(post_types, key=lambda value: (value['slug'] not in ('post', 'page'), value['name'])),
+                'taxonomies': taxonomies,
+            },
+        }
+    except requests.exceptions.RequestException:
+        return False, 'connection_error', 'اتصال به سایت وردپرس برقرار نشد. در دسترس بودن سایت و HTTPS را بررسی کنید.'
+    except Exception:
+        logger.exception('WordPress capability discovery failed')
+        return False, 'unknown', 'دریافت اطلاعات سایت وردپرس ناموفق بود. دوباره تلاش کنید.'
+
+
+def validate_publish_options(connection, options):
+    options = options if isinstance(options, dict) else {}
+    post_type = str(options.get('post_type') or 'post')
+    publish_status = str(options.get('status') or 'draft')
+    if publish_status not in {'draft', 'pending', 'publish'}:
+        return None, 'وضعیت انتخاب‌شده وردپرس معتبر نیست.'
+    post_types = (connection.capabilities or {}).get('post_types') or []
+    selected = next((item for item in post_types if item.get('slug') == post_type), None)
+    if post_types and not selected:
+        return None, 'نوع محتوای انتخاب‌شده دیگر در سایت موجود نیست. اطلاعات سایت را به‌روزرسانی کنید.'
+    selected = selected or {'slug': 'post', 'rest_base': 'posts', 'supports': {}, 'taxonomies': ['category', 'post_tag']}
+    return {
+        'post_type': selected['slug'],
+        'rest_base': selected.get('rest_base') or selected['slug'],
+        'status': publish_status,
+        'excerpt': str(options.get('excerpt') or '').strip(),
+        'slug': str(options.get('slug') or '').strip(),
+        'taxonomy_terms': options.get('taxonomy_terms') if isinstance(options.get('taxonomy_terms'), dict) else {},
+        'featured_attachment_id': str(options.get('featured_attachment_id') or ''),
+        'supports': selected.get('supports') or {},
+        'taxonomies': selected.get('taxonomies') or [],
+    }, None
+
+
+def publish(channel, content, attachments=None, options=None):
     conn = _get_active_connection(channel)
     if not conn:
         return False, 'auth_error', 'اتصال وردپرس فعال یافت نشد. لطفاً ابتدا متصل شوید.'
@@ -121,6 +213,10 @@ def publish(channel, content, attachments=None):
         conn.status = 'invalid'
         conn.save(update_fields=['status'])
         return False, 'auth_error', 'اعتبار اتصال وردپرس قابل خواندن نیست. لطفاً دوباره متصل شوید.'
+
+    publish_options, option_error = validate_publish_options(conn, options)
+    if option_error:
+        return False, 'unknown', option_error
 
     attachments = attachments or []
     media_list = []
@@ -132,6 +228,7 @@ def publish(channel, content, attachments=None):
         if err:
             logger.warning(f'WordPress media upload failed: {err}')
             continue
+        media_info['source_attachment_id'] = str(att.get('id') or '')
         media_list.append(media_info)
 
     # Legacy featured image fallback
@@ -147,7 +244,10 @@ def publish(channel, content, attachments=None):
                 media_list.append(media_info)
 
     if media_list:
-        first_image = next((m for m in media_list if m.get('media_type') == 'image'), None)
+        requested_featured = publish_options.get('featured_attachment_id')
+        first_image = next((m for m in media_list if m.get('media_type') == 'image' and
+                            requested_featured and m.get('source_attachment_id') == requested_featured), None)
+        first_image = first_image or next((m for m in media_list if m.get('media_type') == 'image'), None)
         if first_image:
             featured_id = first_image.get('id')
 
@@ -162,21 +262,38 @@ def publish(channel, content, attachments=None):
     payload = {
         'title': title,
         'content': body,
-        'status': 'publish',
+        'status': publish_options['status'],
     }
-    if featured_id:
+    supports = publish_options.get('supports') or {}
+    if supports and not supports.get('title'):
+        payload.pop('title', None)
+    if supports and not supports.get('editor'):
+        payload.pop('content', None)
+    if publish_options['excerpt'] and (not supports or supports.get('excerpt')):
+        payload['excerpt'] = publish_options['excerpt']
+    if publish_options['slug']:
+        payload['slug'] = publish_options['slug']
+    if featured_id and (not supports or supports.get('thumbnail')):
         payload['featured_media'] = featured_id
 
-    # optionally attach categories/tags if available
+    taxonomies = (conn.capabilities or {}).get('taxonomies') or {}
+    for taxonomy_slug, term_ids in publish_options['taxonomy_terms'].items():
+        if taxonomy_slug not in publish_options['taxonomies'] or not isinstance(term_ids, list):
+            continue
+        taxonomy = taxonomies.get(taxonomy_slug) or {}
+        rest_base = taxonomy.get('rest_base') or taxonomy_slug
+        payload[rest_base] = [int(term_id) for term_id in term_ids if str(term_id).isdigit()]
+
+    # Preserve automatic content tags when the user did not explicitly choose tags.
     tags = content.tags or []
-    if tags:
+    if tags and 'post_tag' in publish_options['taxonomies'] and 'tags' not in payload:
         tag_ids = _resolve_tag_ids(conn, tags)
         if tag_ids:
             payload['tags'] = tag_ids
 
     try:
         resp = safe_post(
-            _api_url(conn.site_url, 'wp/v2/posts'),
+            _api_url(conn.site_url, f"wp/v2/{publish_options['rest_base']}"),
             auth=_basic_auth(conn),
             json=payload,
             timeout=30,
@@ -196,7 +313,13 @@ def publish(channel, content, attachments=None):
         data = resp.json()
         post_id = data.get('id')
         post_url = data.get('link')
-        return True, None, {'post_id': post_id, 'url': post_url}
+        return True, None, {
+            'post_id': post_id,
+            'url': post_url,
+            'edit_url': f'{conn.site_url.rstrip("/")}/wp-admin/post.php?post={post_id}&action=edit' if post_id else '',
+            'status': data.get('status') or publish_options['status'],
+            'post_type': publish_options['post_type'],
+        }
     except requests.exceptions.RequestException as e:
         logger.warning(f'WordPress publish request failed: {e}')
         return False, 'connection_error', f'اتصال به سایت وردپرس برقرار نشد: {e}'

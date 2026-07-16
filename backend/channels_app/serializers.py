@@ -3,10 +3,30 @@ from .models import PublishChannel, ChannelVerification, LinkedInConnection, Wor
 
 
 class PublishChannelSerializer(serializers.ModelSerializer):
+    wordpress = serializers.SerializerMethodField()
+
     class Meta:
         model = PublishChannel
         fields = ['id', 'platform', 'channel_type', 'name', 'external_id', 'username',
-                  'is_verified', 'is_active', 'created_at']
+                  'is_verified', 'is_active', 'created_at', 'wordpress']
+
+    def get_wordpress(self, obj):
+        if obj.platform != 'wordpress':
+            return None
+        connection_id = (obj.extra_data or {}).get('connection_id')
+        connection = WordPressConnection.objects.filter(
+            id=connection_id,
+            workspace=obj.workspace,
+        ).first()
+        if not connection:
+            return {'status': 'invalid', 'capabilities': {}, 'synced_at': None}
+        return {
+            'connection_id': str(connection.id),
+            'status': connection.status,
+            'site_name': connection.site_name or obj.name,
+            'capabilities': connection.capabilities or {},
+            'synced_at': connection.capabilities_synced_at,
+        }
 
 
 class ChannelVerificationSerializer(serializers.ModelSerializer):

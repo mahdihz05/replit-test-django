@@ -281,6 +281,7 @@ def attempt_publish(job):
     attachments = []
     for att in job.attachments.filter(is_active=True):
         attachments.append({
+            'id': str(att.id),
             'media_type': att.media_type,
             'file_path': att.file_path,
             'mime_type': att.mime_type,
@@ -301,7 +302,7 @@ def attempt_publish(job):
         return linkedin.publish(channel, content, attachments=attachments)
     elif channel.platform == 'wordpress':
         from .publishers import wordpress
-        return wordpress.publish(channel, content, attachments=attachments)
+        return wordpress.publish(channel, content, attachments=attachments, options=job.platform_options)
 
     return False, 'unknown', 'Unknown platform'
 

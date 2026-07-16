@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, override_settings
 
-from .publishers import bale, telegram
+from .publishers import bale, telegram, wordpress
 
 
 class SocialPublisherBodyTests(SimpleTestCase):
@@ -37,3 +37,63 @@ class SocialPublisherBodyTests(SimpleTestCase):
         self.assertIsNone(error_type)
         self.assertEqual(message_id, 2)
         send_message.assert_called_once_with('test-token', '@test-channel', 'متن نهایی آماده انتشار')
+
+
+class WordPressPublisherOptionsTests(SimpleTestCase):
+    def setUp(self):
+        self.connection = SimpleNamespace(
+            site_url='https://example.com',
+            wp_username='editor',
+            application_password='encrypted',
+            capabilities={
+                'post_types': [{
+                    'slug': 'portfolio',
+                    'name': 'Portfolio',
+                    'rest_base': 'portfolio',
+                    'supports': {'title': True, 'editor': True, 'excerpt': True, 'thumbnail': True},
+                    'taxonomies': ['project_category'],
+                }],
+                'taxonomies': {
+                    'project_category': {'rest_base': 'project_categories'},
+                },
+            },
+        )
+        self.channel = SimpleNamespace(workspace=object(), external_id='https://example.com')
+        self.content = SimpleNamespace(title='نمونه پروژه', body='متن پروژه', image=None, tags=[])
+
+    @patch('publishing.publishers.wordpress.decrypt_token', return_value='application-password')
+    @patch('publishing.publishers.wordpress.safe_post')
+    @patch('publishing.publishers.wordpress._get_active_connection')
+    def test_custom_type_uses_discovered_endpoint_and_defaults_to_draft(self, get_connection, safe_post, _decrypt):
+        get_connection.return_value = self.connection
+        safe_post.return_value = SimpleNamespace(
+            ok=True,
+            json=lambda: {'id': 42, 'link': 'https://example.com/portfolio/42', 'status': 'draft'},
+        )
+
+        ok, error_type, result = wordpress.publish(
+            self.channel,
+            self.content,
+            options={
+                'post_type': 'portfolio',
+                'excerpt': 'خلاصه',
+                'slug': 'sample-project',
+                'taxonomy_terms': {'project_category': [7]},
+            },
+        )
+
+        self.assertTrue(ok)
+        self.assertIsNone(error_type)
+        self.assertEqual(result['post_id'], 42)
+        request = safe_post.call_args
+        self.assertEqual(request.args[0], 'https://example.com/wp-json/wp/v2/portfolio')
+        self.assertEqual(request.kwargs['json']['status'], 'draft')
+        self.assertEqual(request.kwargs['json']['project_categories'], [7])
+        self.assertEqual(request.kwargs['json']['excerpt'], 'خلاصه')
+        self.assertEqual(request.kwargs['json']['slug'], 'sample-project')
+
+    def test_rejects_type_not_present_in_discovered_capabilities(self):
+        options, error = wordpress.validate_publish_options(self.connection, {'post_type': 'product'})
+
+        self.assertIsNone(options)
+        self.assertTrue(error)

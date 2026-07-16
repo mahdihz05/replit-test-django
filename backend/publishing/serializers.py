@@ -34,4 +34,4 @@ class PublishJobSerializer(serializers.ModelSerializer):
         model = PublishJob
         fields = ['id', 'content', 'content_title', 'channel', 'status', 'scheduled_at',
                   'started_at', 'completed_at', 'attempt_count', 'max_attempts',
-                  'next_retry_at', 'logs', 'attachments', 'created_at']
+                  'next_retry_at', 'platform_options', 'logs', 'attachments', 'created_at']
