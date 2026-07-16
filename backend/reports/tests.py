@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.test import TestCase
 from django.utils import timezone
@@ -10,7 +10,7 @@ from content.models import Content
 from publishing.models import PublishJob
 from channels_app.models import PublishChannel
 from wallet.models import Wallet
-from .views import dashboard_stats
+from .views import _current_and_previous_persian_months, dashboard_stats
 
 
 class DashboardStatsTests(TestCase):
@@ -110,3 +110,36 @@ class DashboardStatsTests(TestCase):
         self.assertEqual(data['channels']['verified'], 1)
         self.assertEqual(data['channels']['by_platform']['telegram'], 1)
         self.assertEqual(data['wallet']['balance'], 1000.0)
+
+    def test_dashboard_content_trend_is_calculated_from_database(self):
+        boundaries = _current_and_previous_persian_months()
+        current_content = Content.objects.create(
+            workspace=self.workspace,
+            created_by=self.user,
+            title='Current month',
+        )
+        previous_contents = [
+            Content.objects.create(
+                workspace=self.workspace,
+                created_by=self.user,
+                title=f'Previous month {index}',
+            )
+            for index in range(2)
+        ]
+
+        current_date = boundaries['current_start'] + timedelta(days=1)
+        previous_date = boundaries['previous_start'] + timedelta(days=1)
+        Content.objects.filter(id=current_content.id).update(
+            created_at=timezone.make_aware(datetime.combine(current_date, datetime.min.time()))
+        )
+        Content.objects.filter(id__in=[content.id for content in previous_contents]).update(
+            created_at=timezone.make_aware(datetime.combine(previous_date, datetime.min.time()))
+        )
+
+        response = self._make_request()
+        data = response.data['data']
+
+        self.assertEqual(data['contents']['current_month'], 1)
+        self.assertEqual(data['contents']['previous_month'], 2)
+        self.assertEqual(data['contents']['change_percent'], -50.0)
+        self.assertEqual(data['publishes']['today'], data['publishes']['by_day'][-1]['count'])

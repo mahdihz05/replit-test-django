@@ -23,11 +23,15 @@ interface DashboardData {
   contents: {
     total: number;
     by_status: Record<string, number>;
+    current_month: number;
+    previous_month: number;
+    change_percent: number | null;
   };
   publishes: {
     total: number;
     by_status: Record<string, number>;
     by_day: { date: string; count: number }[];
+    today: number;
   };
   channels: {
     total: number;
@@ -140,17 +144,30 @@ export default function Dashboard() {
 
   const publishDayData = data?.publishes.by_day || [];
 
+  const contentTrend = (() => {
+    if (!data) return "در حال دریافت اطلاعات";
+    const { current_month, previous_month, change_percent } = data.contents;
+    if (change_percent === null) {
+      return previous_month === 0 && current_month > 0
+        ? `${formatNumber(current_month)} محتوا در ماه جاری`
+        : "بدون تغییر نسبت به ماه قبل";
+    }
+    const direction = change_percent > 0 ? "افزایش" : change_percent < 0 ? "کاهش" : "بدون تغییر";
+    if (change_percent === 0) return `${direction} نسبت به ماه قبل`;
+    return `${formatNumber(Math.abs(change_percent))}٪ ${direction} نسبت به ماه قبل`;
+  })();
+
   const statCards = [
     {
       title: "کل محتوا",
       value: data?.contents.total ?? 0,
       icon: FileText,
-      trend: "+۱۲٪ نسبت به ماه قبل",
+      trend: contentTrend,
       color: "text-blue-500",
     },
     {
       title: "منتشر شده امروز",
-      value: data?.publishes.by_day[6]?.count ?? 0,
+      value: data?.publishes.today ?? 0,
       icon: Send,
       trend: `${data?.publishes.total ?? 0} انتشار کل`,
       color: "text-emerald-500",

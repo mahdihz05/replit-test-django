@@ -18,6 +18,20 @@ const PLATFORMS = [
   { value: "website", label: "وب‌سایت" },
 ];
 
+interface ImageHistoryItem {
+  url: string;
+  prompt: string;
+  platform: string;
+  contentId?: string;
+}
+
+interface ImageContent {
+  id: string;
+  title: string;
+  body: string;
+  image_url: string | null;
+}
+
 export default function AiImages() {
   const { selectedWorkspace } = useAuth();
   const { toast } = useToast();
@@ -27,23 +41,55 @@ export default function AiImages() {
   const [loading, setLoading] = useState(false);
   const [generatedUrl, setGeneratedUrl] = useState<string | null>(null);
   const [contentId, setContentId] = useState<string | null>(null);
-  const [history, setHistory] = useState<{ url: string; prompt: string; platform: string; contentId?: string }[]>([]);
+  const [history, setHistory] = useState<ImageHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [imageCost, setImageCost] = useState(9800);
+  const [imageCost, setImageCost] = useState<number | null>(null);
 
   useEffect(() => {
-    if (!selectedWorkspace) return;
-    apiFetch(`/workspaces/${selectedWorkspace.id}/wallet/`)
-      .then(res => {
-        setWalletBalance(res?.data?.balance ?? 0);
-        if (res?.data?.wallet_costs?.image_generation) {
-          setImageCost(Number(res.data.wallet_costs.image_generation));
-        }
+    if (!selectedWorkspace) {
+      setHistory([]);
+      setWalletBalance(null);
+      setImageCost(null);
+      return;
+    }
+
+    setGeneratedUrl(null);
+    setContentId(null);
+    setHistoryLoading(true);
+    const walletRequest = apiFetch(`/workspaces/${selectedWorkspace.id}/wallet/`)
+      .then((walletResponse) => {
+        setWalletBalance(Number(walletResponse?.data?.balance ?? 0));
+        const configuredCost = walletResponse?.data?.wallet_costs?.image_generation;
+        setImageCost(configuredCost == null ? null : Number(configuredCost));
       })
-      .catch(() => setWalletBalance(null));
+      .catch(() => {
+        setWalletBalance(null);
+        setImageCost(null);
+      });
+
+    const historyRequest = apiFetch(`/workspaces/${selectedWorkspace.id}/contents/?has_image=true&source=ai`)
+      .then((contentResponse) => {
+        const contents: ImageContent[] = Array.isArray(contentResponse?.data) ? contentResponse.data : [];
+        setHistory(contents
+          .filter((content) => !!content.image_url)
+          .slice(0, 12)
+          .map((content) => ({
+            url: content.image_url as string,
+            prompt: content.body || content.title,
+            platform: "",
+            contentId: content.id,
+          })));
+      })
+      .catch((error: any) => {
+        toast({ title: "خطا", description: error.message || "دریافت اطلاعات تصاویر ناموفق بود", variant: "destructive" });
+      });
+
+    Promise.allSettled([walletRequest, historyRequest])
+      .finally(() => setHistoryLoading(false));
   }, [selectedWorkspace]);
 
-  const hasInsufficientBalance = walletBalance !== null && walletBalance < imageCost;
+  const hasInsufficientBalance = walletBalance !== null && imageCost !== null && walletBalance < imageCost;
 
   const handleGenerate = async () => {
     if (!prompt.trim() || !selectedWorkspace || hasInsufficientBalance) return;
@@ -60,6 +106,9 @@ export default function AiImages() {
         setGeneratedUrl(url);
         setContentId(id || null);
         setHistory(prev => [{ url, prompt, platform, contentId: id }, ...prev.slice(0, 11)]);
+        if (imageCost !== null) {
+          setWalletBalance((balance) => balance === null ? null : Math.max(0, balance - imageCost));
+        }
       }
     } catch (error: any) {
       toast({ title: "خطا", description: error.message || "خطا در تولید تصویر", variant: "destructive" });
@@ -119,7 +168,7 @@ export default function AiImages() {
               </Select>
             </div>
             <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-xs text-amber-800 dark:text-amber-400">
-              ⚠️ هر بار تولید تصویر {imageCost.toLocaleString("fa-IR")} تومان از کیف پول کسر می‌شود
+              ⚠️ هزینه هر بار تولید تصویر {imageCost === null ? "در حال دریافت..." : `${imageCost.toLocaleString("fa-IR")} تومان`} است
             </div>
             {walletBalance !== null && (
               <div className={`text-xs flex items-center justify-between ${hasInsufficientBalance ? "text-destructive font-medium" : "text-muted-foreground"}`}>
@@ -131,7 +180,7 @@ export default function AiImages() {
               className="w-full gap-2"
               size="lg"
               onClick={handleGenerate}
-              disabled={loading || !prompt.trim() || hasInsufficientBalance}
+              disabled={loading || !prompt.trim() || hasInsufficientBalance || imageCost === null}
             >
               {loading
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> در حال تولید تصویر...</>
@@ -188,7 +237,15 @@ export default function AiImages() {
         </Card>
       </div>
 
-      {history.length > 0 && (
+      {historyLoading && (
+        <Card>
+          <CardContent className="py-10 flex items-center justify-center gap-2 text-muted-foreground">
+            <Loader2 className="w-5 h-5 animate-spin" /> در حال دریافت تاریخچه تصاویر...
+          </CardContent>
+        </Card>
+      )}
+
+      {!historyLoading && history.length > 0 && (
         <div>
           <h2 className="text-lg font-semibold mb-4">تاریخچه تصاویر</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">

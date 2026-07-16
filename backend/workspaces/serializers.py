@@ -34,5 +34,15 @@ class WorkspaceMemberSerializer(serializers.ModelSerializer):
 
 
 class AddMemberSerializer(serializers.Serializer):
-    phone_number = serializers.CharField(max_length=13)
+    phone_number = serializers.RegexField(
+        regex=r'^09\d{9}$',
+        max_length=11,
+        error_messages={
+            'invalid': 'شماره موبایل باید با 09 شروع شود و 11 رقم باشد.',
+        },
+    )
     role = serializers.ChoiceField(choices=['admin', 'manager'], default='manager')
+
+
+class UpdateMemberSerializer(serializers.Serializer):
+    role = serializers.ChoiceField(choices=['admin', 'manager'])

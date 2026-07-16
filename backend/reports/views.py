@@ -43,6 +43,27 @@ def _last_6_persian_months():
     return months
 
 
+def _current_and_previous_persian_months():
+    """Return Gregorian boundaries for the current and previous Persian months."""
+    today = jdatetime.date.today()
+    current_start = jdatetime.date(today.year, today.month, 1)
+    if today.month == 12:
+        next_start = jdatetime.date(today.year + 1, 1, 1)
+    else:
+        next_start = jdatetime.date(today.year, today.month + 1, 1)
+
+    if today.month == 1:
+        previous_start = jdatetime.date(today.year - 1, 12, 1)
+    else:
+        previous_start = jdatetime.date(today.year, today.month - 1, 1)
+
+    return {
+        'previous_start': previous_start.togregorian(),
+        'current_start': current_start.togregorian(),
+        'next_start': next_start.togregorian(),
+    }
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request, workspace_id):
@@ -58,6 +79,21 @@ def dashboard_stats(request, workspace_id):
 
     contents = Content.objects.filter(workspace_id=workspace_id, is_active=True)
     content_status = contents.values('status').annotate(count=Count('id'))
+    month_boundaries = _current_and_previous_persian_months()
+    current_month_count = contents.filter(
+        created_at__date__gte=month_boundaries['current_start'],
+        created_at__date__lt=month_boundaries['next_start'],
+    ).count()
+    previous_month_count = contents.filter(
+        created_at__date__gte=month_boundaries['previous_start'],
+        created_at__date__lt=month_boundaries['current_start'],
+    ).count()
+    content_change_percent = None
+    if previous_month_count:
+        content_change_percent = round(
+            ((current_month_count - previous_month_count) / previous_month_count) * 100,
+            1,
+        )
 
     jobs = PublishJob.objects.filter(content__workspace_id=workspace_id)
     job_status = jobs.values('status').annotate(count=Count('id'))
@@ -97,11 +133,15 @@ def dashboard_stats(request, workspace_id):
         'contents': {
             'total': contents.count(),
             'by_status': {item['status']: item['count'] for item in content_status},
+            'current_month': current_month_count,
+            'previous_month': previous_month_count,
+            'change_percent': content_change_percent,
         },
         'publishes': {
             'total': jobs.count(),
             'by_status': {item['status']: item['count'] for item in job_status},
             'by_day': publishes_by_day,
+            'today': publishes_by_day[-1]['count'],
         },
         'channels': {
             'total': channels.count(),

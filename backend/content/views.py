@@ -30,6 +30,8 @@ def content_list(request, workspace_id):
         status_filter = request.query_params.get('status')
         search = request.query_params.get('search')
         tags = request.query_params.get('tags')
+        has_image = request.query_params.get('has_image')
+        source = request.query_params.get('source')
 
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -39,6 +41,12 @@ def content_list(request, workspace_id):
             tag_list = tags.split(',')
             for tag in tag_list:
                 qs = qs.filter(tags__contains=tag.strip())
+        if has_image in ('true', '1'):
+            qs = qs.exclude(image='')
+        elif has_image in ('false', '0'):
+            qs = qs.filter(image='')
+        if source in ('ai', 'user'):
+            qs = qs.filter(versions__source=source).distinct()
 
         return Response({'success': True, 'data': ContentSerializer(qs, many=True, context={'request': request}).data})
 
