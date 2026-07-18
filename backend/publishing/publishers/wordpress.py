@@ -391,6 +391,18 @@ def validate_credentials(connection):
             params={'context': 'edit'},
             timeout=15,
         )
+        # Some hosting security rules block the pretty /wp-json/.../users/me
+        # path at the web-server layer while WordPress' equivalent index.php
+        # REST route remains available. This is an official REST routing form
+        # and still requires the same Application Password authentication.
+        content_type = (resp.headers.get('Content-Type') or '').lower()
+        if resp.status_code in (403, 404) and 'application/json' not in content_type:
+            resp = safe_get(
+                f'{connection.site_url.rstrip("/")}/',
+                auth=_basic_auth(connection),
+                params={'rest_route': '/wp/v2/users/me', 'context': 'edit'},
+                timeout=15,
+            )
         return resp.ok
     except Exception as e:
         logger.warning(f'WordPress credential validation failed: {e}')

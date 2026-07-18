@@ -97,3 +97,19 @@ class WordPressPublisherOptionsTests(SimpleTestCase):
 
         self.assertIsNone(options)
         self.assertTrue(error)
+
+    @patch('publishing.publishers.wordpress.decrypt_token', return_value='application-password')
+    @patch('publishing.publishers.wordpress.safe_get')
+    def test_credential_validation_falls_back_to_rest_route_for_hosting_403(self, safe_get, _decrypt):
+        safe_get.side_effect = [
+            SimpleNamespace(ok=False, status_code=403, headers={'Content-Type': 'text/html'}),
+            SimpleNamespace(ok=True, status_code=200, headers={'Content-Type': 'application/json'}),
+        ]
+
+        valid = wordpress.validate_credentials(self.connection)
+
+        self.assertTrue(valid)
+        self.assertEqual(safe_get.call_count, 2)
+        fallback = safe_get.call_args_list[1]
+        self.assertEqual(fallback.args[0], 'https://example.com/')
+        self.assertEqual(fallback.kwargs['params']['rest_route'], '/wp/v2/users/me')

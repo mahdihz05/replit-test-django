@@ -4,6 +4,7 @@ import logging
 import secrets
 from datetime import timedelta
 from cryptography.fernet import Fernet, InvalidToken
+from django.core import signing
 from django.core.signing import TimestampSigner, BadSignature
 from django.core.cache import cache
 from django.conf import settings
@@ -60,6 +61,7 @@ def decrypt_token(value: str) -> str:
 # Public signed state for OAuth callbacks (works across processes)
 _state_signer = TimestampSigner()
 STATE_MAX_AGE_SECONDS = 600  # 10 minutes
+STATE_SIGNING_SALT = 'channels_app.oauth_state.v2'
 
 
 def sign_state(payload: dict) -> str:
@@ -71,14 +73,26 @@ def sign_state(payload: dict) -> str:
     payload['_nonce'] = nonce
     cache_key = f'oauth_nonce:{nonce}'
     cache.set(cache_key, True, timeout=STATE_MAX_AGE_SECONDS)
-    return _state_signer.sign(json.dumps(payload, sort_keys=True, default=str))
+    # signing.dumps encodes JSON as URL-safe base64 before signing it. Raw JSON
+    # is not safe here because WordPress applies slashes to quotes in nested
+    # success_url parameters, which changes the signed value on callback.
+    return signing.dumps(payload, salt=STATE_SIGNING_SALT, compress=True)
 
 
 def unsign_state(value: str) -> dict | None:
     """Validate a signed state, enforcing TTL and one-time nonce consumption."""
     try:
-        raw = _state_signer.unsign(value, max_age=STATE_MAX_AGE_SECONDS)
-        payload = json.loads(raw)
+        try:
+            payload = signing.loads(
+                value,
+                salt=STATE_SIGNING_SALT,
+                max_age=STATE_MAX_AGE_SECONDS,
+            )
+        except BadSignature:
+            # Accept an already-issued legacy state during the short rollout
+            # window. New states never contain raw JSON or quote characters.
+            raw = _state_signer.unsign(value, max_age=STATE_MAX_AGE_SECONDS)
+            payload = json.loads(raw)
         nonce = payload.pop('_nonce', None)
         if not nonce:
             return None

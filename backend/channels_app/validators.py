@@ -7,6 +7,12 @@ from typing import Optional, List
 from requests.adapters import HTTPAdapter
 
 
+WORDPRESS_REQUEST_USER_AGENT = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'AppleWebKit/537.36 Chrome/138 Safari/537.36 Mohtavayar-WordPress/1.0'
+)
+
+
 def _is_private_ip(ip: str) -> bool:
     try:
         parsed = ipaddress.ip_address(ip)
@@ -49,7 +55,10 @@ class PinnedHostAdapter(HTTPAdapter):
 
     def build_connection_pool_key_attributes(self, request, verify, cert=None):
         host_params, ssl_params = super().build_connection_pool_key_attributes(request, verify, cert)
-        host_params['hostname'] = self._ip
+        # requests 2.32+/urllib3 2.x pass these values directly to
+        # connection_from_host(host=..., port=..., scheme=...).  Using the
+        # older/internal ``hostname`` key raises an unexpected keyword error.
+        host_params['host'] = self._ip
         ssl_params['server_hostname'] = self._hostname
         ssl_params['assert_hostname'] = self._hostname
         return host_params, ssl_params
@@ -107,6 +116,10 @@ def _safe_session(url: str):
 
     ip = ips[0]
     session = requests.Session()
+    # Environment proxies would receive the pinned destination instead of the
+    # adapter opening the verified direct connection. Keep this SSRF-sensitive
+    # path deterministic and independent from HTTP(S)_PROXY.
+    session.trust_env = False
     adapter = PinnedHostAdapter(hostname, ip)
     # Mount on the full netloc (host:port) so explicit ports are matched.
     prefix = f'{parsed.scheme}://{netloc}/'
@@ -124,7 +137,11 @@ def safe_request(method: str, url: str, max_redirects: int = 5, **kwargs):
 
     current_url = url
     session, _, hostname = _safe_session(current_url)
-    headers = kwargs.pop('headers', {})
+    headers = dict(kwargs.pop('headers', {}) or {})
+    # Some WordPress hosting firewalls reject requests' default python-requests
+    # user agent even when the REST API is public. Use a browser-compatible
+    # agent while retaining an integration identifier for server logs.
+    headers.setdefault('User-Agent', WORDPRESS_REQUEST_USER_AGENT)
     headers['Host'] = hostname
     response = session.request(method, current_url, headers=headers, allow_redirects=False, **kwargs)
 
@@ -139,7 +156,7 @@ def safe_request(method: str, url: str, max_redirects: int = 5, **kwargs):
         if not is_safe_url(current_url):
             raise requests.RequestException('Redirect target is not safe')
         next_session, _, next_hostname = _safe_session(current_url)
-        next_headers = kwargs.get('headers', {})
+        next_headers = dict(headers)
         next_headers['Host'] = next_hostname
         response = next_session.request(method, current_url, headers=next_headers, allow_redirects=False, **kwargs)
     return response

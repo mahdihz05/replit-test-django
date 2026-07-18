@@ -813,7 +813,13 @@ def wordpress_connect_start(request, workspace_id):
     app_name = getattr(settings, 'WORDPRESS_APP_NAME', 'محتوایار')
     app_id = getattr(settings, 'WORDPRESS_APP_ID', '00000000-0000-0000-0000-000000000000')
     explicit_callback = getattr(settings, 'WORDPRESS_CALLBACK_URL', '')
-    origin = request.data.get('origin', request.headers.get('Origin', '*'))
+    origin = _safe_frontend_origin(
+        request.data.get('origin') or request.headers.get('Origin'),
+        request,
+    )
+    if not origin:
+        return Response({'success': False, 'error': 'مبدأ برنامه برای بازگشت از وردپرس معتبر نیست', 'code': 'INVALID_ORIGIN'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
     state = sign_state({
         'workspace_id': str(workspace_id),
@@ -825,7 +831,7 @@ def wordpress_connect_start(request, workspace_id):
     if explicit_callback:
         success_url = f'{explicit_callback}?state={state}'
     else:
-        success_url = f'https://localhost/api/workspaces/{workspace_id}/wordpress/callback/?state={state}'
+        success_url = f'{origin}/api/workspaces/{workspace_id}/wordpress/callback/?state={state}'
     reject_url = success_url
 
     auth_url = _wordpress_authorize_url(site_url, app_name, app_id, success_url, reject_url)
@@ -840,20 +846,28 @@ def wordpress_connect_callback(request, workspace_id):
     username = request.GET.get('user_login', '').strip()
     password = request.GET.get('password', '').strip()
 
-    if not state or not username or not password:
+    if not state:
         return _oauth_callback_html(False, 'اطلاعات کامل بازگشت از وردپرس موجود نیست', 'wordpress')
 
     stored = unsign_state(state)
     if not stored:
         return _oauth_callback_html(False, 'SESSION_EXPIRED', 'wordpress')
 
+    origin = stored.get('origin', '*')
+
+    if not username or not password:
+        return _oauth_callback_html(
+            False,
+            'اتصال وردپرس تأیید نشد یا اطلاعات کامل از وردپرس بازنگشت.',
+            'wordpress',
+            origin,
+        )
+
     if str(stored.get('workspace_id')) != str(workspace_id):
         return _oauth_callback_html(False, 'WORKSPACE_MISMATCH', 'wordpress')
 
     site_url = stored.get('site_url', '')
     user_id = stored.get('user_id')
-    origin = stored.get('origin', '*')
-
     if not site_url or not is_safe_url(site_url):
         return _oauth_callback_html(False, 'SITE_URL_MISSING', 'wordpress', origin)
 

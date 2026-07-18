@@ -5,6 +5,8 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .views import _validate_telegram_chat
+from .validators import PinnedHostAdapter, WORDPRESS_REQUEST_USER_AGENT, _safe_session, safe_request
+from .crypto import sign_state, unsign_state
 from .models import LinkedInConnection, LinkedInOAuthState, PublishChannel
 from users.models import User
 from workspaces.models import Workspace, WorkspaceMember
@@ -63,6 +65,54 @@ class TelegramChatValidationTests(SimpleTestCase):
         self.assertEqual(code, 'CHAT_TYPE_MISMATCH')
         self.assertTrue(error)
 
+
+class SafeRequestAdapterTests(SimpleTestCase):
+    def test_pinned_adapter_uses_urllib3_host_parameter_and_preserves_tls_name(self):
+        from requests import Request
+
+        request = Request('GET', 'https://example.com/wp-json/').prepare()
+        adapter = PinnedHostAdapter('example.com', '93.184.216.34')
+
+        host_params, ssl_params = adapter.build_connection_pool_key_attributes(request, True)
+
+        self.assertEqual(host_params['host'], '93.184.216.34')
+        self.assertNotIn('hostname', host_params)
+        self.assertEqual(ssl_params['server_hostname'], 'example.com')
+        self.assertEqual(ssl_params['assert_hostname'], 'example.com')
+
+    @patch('channels_app.validators._resolve_all_ips', return_value=['93.184.216.34'])
+    def test_safe_session_ignores_environment_proxies(self, _resolve):
+        session, ip, hostname = _safe_session('https://example.com/wp-json/')
+
+        self.assertFalse(session.trust_env)
+        self.assertEqual(ip, '93.184.216.34')
+        self.assertEqual(hostname, 'example.com')
+
+    @patch('channels_app.validators._safe_session')
+    @patch('channels_app.validators.is_safe_url', return_value=True)
+    def test_safe_request_supplies_wordpress_compatible_user_agent(self, _safe_url, safe_session):
+        session = Mock()
+        session.request.return_value = Mock(status_code=200, headers={}, url='https://example.com/wp-json/')
+        safe_session.return_value = (session, '93.184.216.34', 'example.com')
+
+        safe_request('GET', 'https://example.com/wp-json/')
+
+        headers = session.request.call_args.kwargs['headers']
+        self.assertEqual(headers['User-Agent'], WORDPRESS_REQUEST_USER_AGENT)
+        self.assertEqual(headers['Host'], 'example.com')
+
+
+class OAuthStateEncodingTests(SimpleTestCase):
+    def test_state_is_url_safe_and_round_trips_without_raw_json(self):
+        state = sign_state({'workspace_id': 'workspace', 'origin': 'https://localhost:5173'})
+
+        self.assertNotIn('{', state)
+        self.assertNotIn('"', state)
+        self.assertNotIn('\\', state)
+        self.assertEqual(unsign_state(state), {
+            'workspace_id': 'workspace',
+            'origin': 'https://localhost:5173',
+        })
 
 @override_settings(
     LINKEDIN_CLIENT_ID='test-client',
