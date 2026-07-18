@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from .views import _validate_telegram_chat
 from .validators import PinnedHostAdapter, WORDPRESS_REQUEST_USER_AGENT, _safe_session, safe_request
 from .crypto import sign_state, unsign_state
-from .models import LinkedInConnection, LinkedInOAuthState, PublishChannel
+from .models import LinkedInConnection, LinkedInOAuthState, PublishChannel, WordPressConnection
 from users.models import User
 from workspaces.models import Workspace, WorkspaceMember
 
@@ -113,6 +113,51 @@ class OAuthStateEncodingTests(SimpleTestCase):
             'workspace_id': 'workspace',
             'origin': 'https://localhost:5173',
         })
+
+
+@override_settings(
+    CORS_ALLOWED_ORIGINS=['https://app.test'],
+    LINKEDIN_TOKEN_ENCRYPTION_KEY='MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=',
+)
+class WordPressOAuthTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(phone_number='09120000002')
+        self.workspace = Workspace.objects.create(name='WordPress Test', owner=self.user)
+        WorkspaceMember.objects.create(
+            workspace=self.workspace, user=self.user, role='admin', added_by=self.user,
+        )
+        self.client = APIClient()
+
+    @patch('channels_app.views.wp_publisher.validate_credentials', return_value=False)
+    def test_callback_keeps_firewalled_connection_visible_for_recheck(self, _validate):
+        state = sign_state({
+            'workspace_id': str(self.workspace.id),
+            'site_url': 'https://example.com',
+            'user_id': str(self.user.id),
+            'origin': 'https://app.test',
+        })
+
+        response = self.client.get(
+            f'/api/workspaces/{self.workspace.id}/wordpress/callback/',
+            {
+                'state': state,
+                'site_url': 'https://example.com',
+                'user_login': 'editor',
+                'password': 'application-password',
+            },
+            secure=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'postMessage')
+        self.assertContains(response, '141.11.1.223')
+        connection = WordPressConnection.objects.get()
+        self.assertEqual(connection.status, 'invalid')
+        channel = PublishChannel.objects.get(platform='wordpress')
+        self.assertFalse(channel.is_verified)
+        self.assertTrue(channel.is_active)
+        self.assertEqual(channel.extra_data['connection_id'], str(connection.id))
+
 
 @override_settings(
     LINKEDIN_CLIENT_ID='test-client',

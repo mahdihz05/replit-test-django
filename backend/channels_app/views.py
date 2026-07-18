@@ -79,6 +79,28 @@ window.close();
     return HttpResponse(html, content_type='text/html; charset=utf-8')
 
 
+def _wordpress_firewall_message():
+    return (
+        'اتصال WordPress ذخیره شد، اما هاست سایت درخواست‌های سرور محتوایار را با 403 رد می‌کند. '
+        'IP سرور 141.11.1.223 را در فایروال/ModSecurity/افزونه امنیتی سایت مجاز کنید و سپس «بررسی اتصال» را بزنید.'
+    )
+
+
+def _upsert_wordpress_channel(workspace_id, conn, is_verified):
+    return PublishChannel.objects.update_or_create(
+        workspace_id=workspace_id,
+        platform='wordpress',
+        external_id=conn.site_url,
+        defaults={
+            'name': conn.site_name or f'WordPress — {conn.site_url}',
+            'channel_type': 'site',
+            'is_verified': is_verified,
+            'is_active': True,
+            'extra_data': {'connection_id': str(conn.id)},
+        },
+    )
+
+
 # ─────────────────────────────────────────────
 # Generic channels
 # ─────────────────────────────────────────────
@@ -393,7 +415,9 @@ def channel_test(request, workspace_id, channel_id):
 
     try:
         channel = PublishChannel.objects.get(id=channel_id, workspace_id=workspace_id,
-                                             is_active=True, is_verified=True)
+                                             is_active=True)
+        if not channel.is_verified and channel.platform != 'wordpress':
+            raise PublishChannel.DoesNotExist()
     except (PublishChannel.DoesNotExist, ValidationError):
         return Response({'success': False, 'error': 'کانال یافت نشد یا تأیید نشده است', 'code': 'NOT_FOUND'},
                         status=status.HTTP_404_NOT_FOUND)
@@ -418,8 +442,14 @@ def channel_test(request, workspace_id, channel_id):
             if connection:
                 connection.status = 'invalid'
                 connection.save(update_fields=['status'])
-            return Response({'success': False, 'error': 'اتصال وردپرس معتبر نیست؛ سایت را دوباره متصل کنید.', 'code': 'AUTH_ERROR'},
+            channel.is_verified = False
+            channel.save(update_fields=['is_verified'])
+            return Response({'success': False, 'error': _wordpress_firewall_message(), 'code': 'AUTH_ERROR'},
                             status=status.HTTP_400_BAD_REQUEST)
+        connection.status = 'active'
+        connection.save(update_fields=['status'])
+        channel.is_verified = True
+        channel.save(update_fields=['is_verified'])
         return Response({'success': True, 'data': {'message': 'اتصال وردپرس سالم و آماده انتشار است'}})
     else:
         return Response({'success': False, 'error': 'این پلتفرم از تست پشتیبانی نمی‌کند', 'code': 'UNSUPPORTED'},
@@ -893,22 +923,16 @@ def wordpress_connect_callback(request, workspace_id):
         if not wp_publisher.validate_credentials(conn):
             conn.status = 'invalid'
             conn.save(update_fields=['status'])
-            return _oauth_callback_html(False, 'اعتبارنامه وردپرس معتبر نیست', 'wordpress', origin)
+            _upsert_wordpress_channel(workspace_id, conn, is_verified=False)
+            return _oauth_callback_html(True, _wordpress_firewall_message(), 'wordpress', origin, {
+                'connection_id': str(conn.id),
+                'site_url': site_url,
+                'status': 'invalid',
+            })
 
         _sync_wordpress_capabilities(conn)
 
-        PublishChannel.objects.update_or_create(
-            workspace_id=workspace_id,
-            platform='wordpress',
-            external_id=site_url,
-            defaults={
-                'name': conn.site_name or f'WordPress — {conn.site_url}',
-                'channel_type': 'site',
-                'is_verified': True,
-                'is_active': True,
-                'extra_data': {'connection_id': str(conn.id)},
-            },
-        )
+        _upsert_wordpress_channel(workspace_id, conn, is_verified=True)
 
         return _oauth_callback_html(True, 'اتصال WordPress با موفقیت انجام شد', 'wordpress', origin, {
             'connection_id': str(conn.id),
