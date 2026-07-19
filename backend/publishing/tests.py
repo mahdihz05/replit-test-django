@@ -75,6 +75,7 @@ class WordPressPublisherOptionsTests(SimpleTestCase):
             self.channel,
             self.content,
             options={
+                'title': 'عنوان اختصاصی وردپرس',
                 'post_type': 'portfolio',
                 'excerpt': 'خلاصه',
                 'slug': 'sample-project',
@@ -88,6 +89,7 @@ class WordPressPublisherOptionsTests(SimpleTestCase):
         request = safe_post.call_args
         self.assertEqual(request.args[0], 'https://example.com/wp-json/wp/v2/portfolio')
         self.assertEqual(request.kwargs['json']['status'], 'draft')
+        self.assertEqual(request.kwargs['json']['title'], 'عنوان اختصاصی وردپرس')
         self.assertEqual(request.kwargs['json']['project_categories'], [7])
         self.assertEqual(request.kwargs['json']['excerpt'], 'خلاصه')
         self.assertEqual(request.kwargs['json']['slug'], 'sample-project')
@@ -97,6 +99,28 @@ class WordPressPublisherOptionsTests(SimpleTestCase):
 
         self.assertIsNone(options)
         self.assertTrue(error)
+
+    @patch('publishing.publishers.wordpress.safe_get')
+    def test_rest_get_falls_back_and_preserves_query_parameters(self, safe_get):
+        safe_get.side_effect = [
+            SimpleNamespace(ok=False, status_code=404),
+            SimpleNamespace(ok=True, status_code=200),
+        ]
+
+        response = wordpress._rest_get(
+            self.connection,
+            'wp/v2/types',
+            params={'context': 'edit'},
+            timeout=20,
+        )
+
+        self.assertTrue(response.ok)
+        fallback = safe_get.call_args_list[1]
+        self.assertEqual(fallback.args[0], 'https://example.com/')
+        self.assertEqual(fallback.kwargs['params'], {
+            'context': 'edit',
+            'rest_route': '/wp/v2/types',
+        })
 
     @patch('publishing.publishers.wordpress.decrypt_token', return_value='application-password')
     @patch('publishing.publishers.wordpress.safe_get')
@@ -113,3 +137,25 @@ class WordPressPublisherOptionsTests(SimpleTestCase):
         fallback = safe_get.call_args_list[1]
         self.assertEqual(fallback.args[0], 'https://example.com/')
         self.assertEqual(fallback.kwargs['params']['rest_route'], '/wp/v2/users/me')
+
+    @patch('publishing.publishers.wordpress.is_safe_url', return_value=True)
+    @patch('publishing.publishers.wordpress.safe_get')
+    def test_application_password_check_falls_back_to_rest_route_for_hosting_404(
+        self, safe_get, _safe_url,
+    ):
+        safe_get.side_effect = [
+            SimpleNamespace(ok=False, status_code=404),
+            SimpleNamespace(
+                ok=True,
+                status_code=200,
+                json=lambda: {'authentication': {'application-passwords': {'endpoints': {}}}},
+            ),
+        ]
+
+        ok, error = wordpress.check_application_passwords('https://example.com')
+
+        self.assertTrue(ok)
+        self.assertIsNone(error)
+        fallback = safe_get.call_args_list[1]
+        self.assertEqual(fallback.args[0], 'https://example.com/')
+        self.assertEqual(fallback.kwargs['params']['rest_route'], '/')

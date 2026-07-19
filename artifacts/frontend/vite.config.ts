@@ -28,6 +28,7 @@ if (!basePath) {
 }
 
 const localHttpsPfx = process.env.LOCAL_HTTPS_PFX;
+const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
 const localHttps = localHttpsPfx
   ? {
       pfx: fs.readFileSync(localHttpsPfx),
@@ -78,22 +79,22 @@ export default defineConfig({
     },
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: backendUrl,
         changeOrigin: true,
         xfwd: true,
       },
       "/media": {
-        target: "http://localhost:8000",
+        target: backendUrl,
         changeOrigin: true,
         xfwd: true,
       },
       "/admin": {
-        target: "http://localhost:8000",
+        target: backendUrl,
         changeOrigin: true,
         xfwd: true,
       },
       "/static": {
-        target: "http://localhost:8000",
+        target: backendUrl,
         changeOrigin: true,
         xfwd: true,
       },

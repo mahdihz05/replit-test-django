@@ -28,6 +28,31 @@ def _api_url(site_url, path):
     return f'{base}/wp-json/{path}'
 
 
+def _rest_request(method, connection, path, **kwargs):
+    """Call a WP REST route, falling back when pretty permalinks/WAF return 403/404."""
+    requester = safe_get if method == 'get' else safe_post
+    response = requester(_api_url(connection.site_url, path), **kwargs)
+    if getattr(response, 'status_code', None) not in (403, 404):
+        return response
+
+    fallback_kwargs = dict(kwargs)
+    fallback_params = dict(fallback_kwargs.pop('params', {}) or {})
+    fallback_params['rest_route'] = f'/{path.lstrip("/")}'
+    return requester(
+        f'{connection.site_url.rstrip("/")}/',
+        params=fallback_params,
+        **fallback_kwargs,
+    )
+
+
+def _rest_get(connection, path, **kwargs):
+    return _rest_request('get', connection, path, **kwargs)
+
+
+def _rest_post(connection, path, **kwargs):
+    return _rest_request('post', connection, path, **kwargs)
+
+
 def _basic_auth(connection):
     password = decrypt_token(connection.application_password)
     return (connection.wp_username, password)
@@ -75,8 +100,9 @@ def _upload_media_to_wordpress(connection, file_path, original_filename, mime_ty
             filename = resolved_path.split('/')[-1] or original_filename or 'file'
 
         auth = _basic_auth(connection)
-        resp = safe_post(
-            _api_url(connection.site_url, 'wp/v2/media'),
+        resp = _rest_post(
+            connection,
+            'wp/v2/media',
             auth=auth,
             files={'file': (filename, file_data, content_type)},
             timeout=120,
@@ -122,10 +148,10 @@ def discover_capabilities(connection):
     try:
         auth = _basic_auth(connection)
         root = safe_get(f'{connection.site_url.rstrip("/")}/wp-json/', timeout=15)
-        types_resp = safe_get(_api_url(connection.site_url, 'wp/v2/types'), auth=auth,
-                              params={'context': 'edit'}, timeout=20)
-        tax_resp = safe_get(_api_url(connection.site_url, 'wp/v2/taxonomies'), auth=auth,
-                            params={'context': 'edit'}, timeout=20)
+        types_resp = _rest_get(connection, 'wp/v2/types', auth=auth,
+                               params={'context': 'edit'}, timeout=20)
+        tax_resp = _rest_get(connection, 'wp/v2/taxonomies', auth=auth,
+                             params={'context': 'edit'}, timeout=20)
         if not types_resp.ok:
             error_type, message = _classify_error(types_resp.text[:300], types_resp.status_code)
             return False, error_type, message
@@ -137,7 +163,7 @@ def discover_capabilities(connection):
         post_types = []
         for slug, item in type_data.items():
             rest_base = item.get('rest_base') or slug
-            if slug in excluded or not rest_base:
+            if slug in excluded or not rest_base or item.get('viewable') is False:
                 continue
             post_types.append({
                 'slug': slug,
@@ -151,8 +177,8 @@ def discover_capabilities(connection):
         for slug, item in tax_data.items():
             rest_base = item.get('rest_base') or slug
             terms = []
-            terms_resp = safe_get(_api_url(connection.site_url, f'wp/v2/{rest_base}'), auth=auth,
-                                  params={'per_page': 100, 'orderby': 'name'}, timeout=20)
+            terms_resp = _rest_get(connection, f'wp/v2/{rest_base}', auth=auth,
+                                   params={'per_page': 100, 'orderby': 'name'}, timeout=20)
             if terms_resp.ok:
                 terms = [{'id': term.get('id'), 'name': term.get('name'), 'parent': term.get('parent', 0)}
                          for term in terms_resp.json()]
@@ -191,6 +217,7 @@ def validate_publish_options(connection, options):
         return None, 'نوع محتوای انتخاب‌شده دیگر در سایت موجود نیست. اطلاعات سایت را به‌روزرسانی کنید.'
     selected = selected or {'slug': 'post', 'rest_base': 'posts', 'supports': {}, 'taxonomies': ['category', 'post_tag']}
     return {
+        'title': str(options.get('title') or '').strip()[:200],
         'post_type': selected['slug'],
         'rest_base': selected.get('rest_base') or selected['slug'],
         'status': publish_status,
@@ -252,7 +279,9 @@ def publish(channel, content, attachments=None, options=None):
             featured_id = first_image.get('id')
 
     body = content.body or ''
-    if content.title and content.title not in ('untitled', ''):
+    if publish_options.get('title'):
+        title = publish_options['title']
+    elif content.title and content.title not in ('untitled', ''):
         title = content.title
     else:
         title = body[:100] if body else 'پست محتوایار'
@@ -292,8 +321,9 @@ def publish(channel, content, attachments=None, options=None):
             payload['tags'] = tag_ids
 
     try:
-        resp = safe_post(
-            _api_url(conn.site_url, f"wp/v2/{publish_options['rest_base']}"),
+        resp = _rest_post(
+            conn,
+            f"wp/v2/{publish_options['rest_base']}",
             auth=_basic_auth(conn),
             json=payload,
             timeout=30,
@@ -335,8 +365,9 @@ def _resolve_tag_ids(connection, tags):
         if not tag or not isinstance(tag, str):
             continue
         try:
-            search = safe_get(
-                _api_url(connection.site_url, 'wp/v2/tags'),
+            search = _rest_get(
+                connection,
+                'wp/v2/tags',
                 auth=auth,
                 params={'search': tag, 'per_page': 1},
                 timeout=15,
@@ -346,8 +377,9 @@ def _resolve_tag_ids(connection, tags):
                 if results:
                     tag_ids.append(results[0]['id'])
                     continue
-            create = safe_post(
-                _api_url(connection.site_url, 'wp/v2/tags'),
+            create = _rest_post(
+                connection,
+                'wp/v2/tags',
                 auth=auth,
                 json={'name': tag},
                 timeout=15,
@@ -369,6 +401,19 @@ def check_application_passwords(site_url):
             timeout=15,
             headers={'Accept': 'application/json'},
         )
+        # Some shared hosts deliberately return a synthetic 403/404 for the
+        # pretty REST path to server-side clients. WordPress supports the
+        # equivalent rest_route form even when rewrite/WAF rules block
+        # /wp-json/. This is the same official API, not a bypass of auth.
+        if resp.status_code in (403, 404):
+            fallback = safe_get(
+                f'{site_url.rstrip("/")}/',
+                params={'rest_route': '/'},
+                timeout=15,
+                headers={'Accept': 'application/json'},
+            )
+            if fallback.ok:
+                resp = fallback
         if not resp.ok:
             return False, (
                 f'رابط REST وردپرس در دسترس نیست (HTTP {resp.status_code}). '

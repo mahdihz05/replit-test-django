@@ -52,6 +52,7 @@ interface WordPressCapabilities {
 }
 
 interface WordPressPublishOptions {
+  title: string;
   post_type: string;
   status: "draft" | "pending" | "publish";
   excerpt: string;
@@ -210,6 +211,7 @@ export default function Publish() {
   );
 
   const defaultWordpressOptions = (channel: Channel): WordPressPublishOptions => ({
+    title: "",
     post_type: channel.wordpress?.capabilities?.post_types?.[0]?.slug || "post",
     status: "draft",
     excerpt: "",
@@ -643,6 +645,22 @@ export default function Publish() {
                     </div>
                   ) : (
                     <>
+                      {(!selectedType?.supports || selectedType.supports.title) && (
+                        <div className="space-y-2">
+                          <Label htmlFor={`wp-title-${channelId}`}>عنوان وردپرس</Label>
+                          <Input
+                            id={`wp-title-${channelId}`}
+                            value={options.title}
+                            maxLength={200}
+                            onChange={event => updateWordpressOptions(channelId, { title: event.target.value })}
+                            placeholder={titlePreview || "عنوان نوشته یا برگه را بنویسید"}
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            اگر خالی باشد، عنوان محتوای ذخیره‌شده استفاده می‌شود؛ این عنوان فقط برای وردپرس است.
+                          </p>
+                        </div>
+                      )}
+
                       <div className="space-y-2">
                         <Label htmlFor={`wp-type-${channelId}`}>نوع محتوا</Label>
                         <select
