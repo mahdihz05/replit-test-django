@@ -99,10 +99,33 @@ def is_safe_url(url: str) -> bool:
 
 
 def normalize_site_url(url: str) -> str:
-    url = url.strip().rstrip('/')
+    url = url.strip()
     if not url.startswith('http://') and not url.startswith('https://'):
         url = f'https://{url}'
-    return url
+
+    parsed = urlparse(url)
+    path = parsed.path.rstrip('/')
+    lower_path = path.lower()
+
+    # Users often paste the current wp-admin or REST URL. The integration
+    # needs the WordPress installation root instead. Preserve a possible
+    # subdirectory install (e.g. /blog) while removing WordPress endpoints.
+    endpoint_positions = [
+        position
+        for marker in ('/wp-admin', '/wp-json')
+        if (position := lower_path.find(marker)) >= 0
+    ]
+    if endpoint_positions:
+        path = path[:min(endpoint_positions)].rstrip('/')
+
+    return urlunparse((
+        parsed.scheme.lower(),
+        parsed.netloc,
+        path,
+        '',
+        '',
+        '',
+    )).rstrip('/')
 
 
 def _safe_session(url: str):

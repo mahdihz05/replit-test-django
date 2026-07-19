@@ -1048,7 +1048,7 @@ export default function Channels() {
                   className="dir-ltr"
                 />
                 <p className="text-xs text-muted-foreground">
-                  باید سایت وردپرس اختصاصی (self-hosted) یا پلن Business وردپرس کام باشد.
+                  فقط آدرس اصلی سایت را وارد کنید؛ مثل https://example.com. وردپرس روی هاست اشتراکی هم پشتیبانی می‌شود؛ آدرس wp-admin را وارد نکنید.
                 </p>
               </div>
 

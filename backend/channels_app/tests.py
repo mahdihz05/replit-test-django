@@ -5,7 +5,13 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .views import _validate_telegram_chat
-from .validators import PinnedHostAdapter, WORDPRESS_REQUEST_USER_AGENT, _safe_session, safe_request
+from .validators import (
+    PinnedHostAdapter,
+    WORDPRESS_REQUEST_USER_AGENT,
+    _safe_session,
+    normalize_site_url,
+    safe_request,
+)
 from .crypto import sign_state, unsign_state
 from .models import LinkedInConnection, LinkedInOAuthState, PublishChannel, WordPressConnection
 from users.models import User
@@ -100,6 +106,26 @@ class SafeRequestAdapterTests(SimpleTestCase):
         headers = session.request.call_args.kwargs['headers']
         self.assertEqual(headers['User-Agent'], WORDPRESS_REQUEST_USER_AGENT)
         self.assertEqual(headers['Host'], 'example.com')
+
+
+class WordPressUrlNormalizationTests(SimpleTestCase):
+    def test_removes_wp_admin_page_and_query(self):
+        self.assertEqual(
+            normalize_site_url('https://example.com/wp-admin/options-general.php?page=test'),
+            'https://example.com',
+        )
+
+    def test_removes_wp_json_but_preserves_subdirectory_install(self):
+        self.assertEqual(
+            normalize_site_url('example.com/blog/wp-json/wp/v2/posts'),
+            'https://example.com/blog',
+        )
+
+    def test_removes_query_and_fragment_from_site_root(self):
+        self.assertEqual(
+            normalize_site_url('https://example.com/?ref=channel#connect'),
+            'https://example.com',
+        )
 
 
 class OAuthStateEncodingTests(SimpleTestCase):

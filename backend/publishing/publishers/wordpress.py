@@ -370,11 +370,25 @@ def check_application_passwords(site_url):
             headers={'Accept': 'application/json'},
         )
         if not resp.ok:
-            return False, 'این سایت وردپرس از این روش اتصال پشتیبانی نمی‌کند. لطفاً از یک سایت وردپرس اختصاصی (self-hosted) یا پلن Business به بالای WordPress.com استفاده کنید.'
-        data = resp.json()
+            return False, (
+                f'رابط REST وردپرس در دسترس نیست (HTTP {resp.status_code}). '
+                'آدرس اصلی سایت را وارد کنید و اگر مشکل ادامه داشت، '
+                'تنظیمات فایروال، ModSecurity یا افزونه امنیتی هاست را بررسی کنید.'
+            )
+        try:
+            data = resp.json()
+        except ValueError:
+            return False, (
+                'پاسخ REST API وردپرس JSON معتبر نیست. '
+                'احتمالاً فایروال یا افزونه امنیتی پاسخ را تغییر داده است.'
+            )
         auth = data.get('authentication', {})
         if 'application-passwords' not in auth:
-            return False, 'این سایت وردپرس از این روش اتصال پشتیبانی نمی‌کند. لطفاً از یک سایت وردپرس اختصاصی (self-hosted) یا پلن Business به بالای WordPress.com استفاده کنید.'
+            return False, (
+                'قابلیت Application Passwords در این وردپرس فعال نیست. '
+                'وردپرس را به نسخه 5.6 یا بالاتر ارتقا دهید، HTTPS را فعال نگه دارید '
+                'و افزونه‌های امنیتی یا فیلترهایی که Application Passwords را غیرفعال می‌کنند بررسی کنید.'
+            )
         return True, None
     except requests.exceptions.RequestException as e:
         return False, f'اتصال به سایت وردپرس برقرار نشد: {e}'
