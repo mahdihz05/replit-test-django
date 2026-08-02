@@ -20,7 +20,7 @@ interface AuthContextType {
   workspaces: Workspace[];
   selectedWorkspace: Workspace | null;
   isLoading: boolean;
-  login: (token: string, userData: User) => void;
+  login: (token: string, userData: User) => Promise<void>;
   logout: () => void;
   selectWorkspace: (id: string) => void;
   refreshWorkspaces: () => Promise<void>;
@@ -81,10 +81,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     initAuth();
   }, []);
 
-  const login = (token: string, userData: User) => {
+  const login = async (token: string, userData: User) => {
     setToken(token);
     setUser(userData);
-    refreshWorkspaces();
+    await refreshWorkspaces();
   };
 
   const logout = () => {

@@ -35,7 +35,7 @@ export default function Login() {
         data: { phone_number: phone, password }
       });
       if (response?.data?.access) {
-        login(response.data.access, response.data.user);
+        await login(response.data.access, response.data.user);
         toast({ title: "خوش آمدید", description: "ورود با موفقیت انجام شد" });
         setLocation("/");
       }
@@ -80,7 +80,7 @@ export default function Login() {
         data: { phone_number: phone, code }
       });
       if (response?.data?.access) {
-        login(response.data.access, response.data.user);
+        await login(response.data.access, response.data.user);
         toast({ title: "خوش آمدید", description: "ورود با موفقیت انجام شد" });
         setLocation("/");
       }

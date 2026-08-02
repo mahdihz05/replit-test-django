@@ -63,6 +63,10 @@ def start_bale_bot():
         if not token:
             logger.warning('[Bale Bot] BALE_BOT_TOKEN not set, skipping bot startup')
             return
+        _, err = _bale_call(token, 'getMe', {})
+        if err:
+            logger.warning('[Bale Bot] BALE_BOT_TOKEN is invalid or unreachable, skipping bot startup: %s', err)
+            return
         _bale_started = True
 
     def run():
