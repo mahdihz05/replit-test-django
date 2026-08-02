@@ -185,6 +185,7 @@ export default function Publish() {
   const [publishing, setPublishing] = useState(false);
   const [results, setResults] = useState<PublishResult[] | null>(null);
   const [overallStatus, setOverallStatus] = useState<string>("");
+  const hasLinkedInSelected = selectedChannels.some(id => channels.find(channel => channel.id === id)?.platform === "linkedin");
 
   useEffect(() => {
     if (!selectedWorkspace) return;
@@ -309,7 +310,9 @@ export default function Publish() {
     const hasText = contentTab === "saved" ? !!selectedContent : customText.trim().length > 0;
     const hasChannels = selectedChannels.length > 0;
     const hasTime = publishType === "now" || !!scheduledAt;
-    return hasText && hasChannels && hasTime && !publishing && !uploading;
+    const text = contentTab === "saved" ? (selectedContent?.body || "") : customText.trim();
+    const linkedInLengthIsValid = !hasLinkedInSelected || text.length <= 3000;
+    return hasText && hasChannels && hasTime && linkedInLengthIsValid && !publishing && !uploading;
   };
 
   const handlePublish = async () => {
@@ -498,11 +501,22 @@ export default function Publish() {
           {textPreview && (
             <Card className="bg-muted/30">
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground">پیش‌نمایش</CardTitle>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <CardTitle className="text-sm text-muted-foreground">متن نهایی قابل انتشار</CardTitle>
+                  <Badge variant="secondary">{textPreview.length.toLocaleString("fa-IR")} نویسه · {textPreview.split("\n").length.toLocaleString("fa-IR")} خط</Badge>
+                </div>
               </CardHeader>
               <CardContent>
                 {titlePreview && <p className="font-bold text-sm mb-1">{titlePreview}</p>}
-                <p className="text-sm whitespace-pre-wrap line-clamp-5">{textPreview}</p>
+                <p className="max-h-72 overflow-y-auto text-sm leading-7 whitespace-pre-wrap">{textPreview}</p>
+                {hasLinkedInSelected && titlePreview && (
+                  <p className="mt-2 text-xs text-muted-foreground">عنوان بالا داخلی است و در متن پست لینکدین ارسال نمی‌شود.</p>
+                )}
+                {hasLinkedInSelected && textPreview.length > 3000 && (
+                  <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                    لینکدین حداکثر ۳۰۰۰ نویسه می‌پذیرد. برنامه متن را ناقص نمی‌کند؛ برای فعال‌شدن انتشار، متن را کوتاه کنید.
+                  </p>
+                )}
               </CardContent>
             </Card>
           )}
@@ -564,6 +578,9 @@ export default function Publish() {
                           <span className="text-amber-600">
                             • {unsupported.map(a => a.media_type).join("، ")} در این پلتفرم پشتیبانی نمی‌شود و رد می‌شود.
                           </span>
+                        )}
+                        {ch.platform === "linkedin" && attachments.filter(a => SUPPORTED_MEDIA.linkedin.has(a.media_type)).length > 1 && (
+                          <span className="text-amber-600">• لینکدین فقط اولین رسانه سازگار انتخاب‌شده را همراه متن ارسال می‌کند.</span>
                         )}
                       </div>
                     );

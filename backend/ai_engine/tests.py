@@ -2,6 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.test import TestCase, override_settings
+from rest_framework.test import APIClient
+
+from users.models import User
+from workspaces.models import Workspace, WorkspaceMember
 
 from config.ai import (
     apply_profit_margin,
@@ -10,7 +14,7 @@ from config.ai import (
     get_model,
     get_wallet_cost,
 )
-from .models import AIConfiguration
+from .models import AIConfiguration, GeneratedItem, GenerationBatch
 from .prompts import build_image_prompt_from_text, build_text_prompt
 
 
@@ -90,3 +94,49 @@ class ContentPromptQualityTests(TestCase):
         self.assertIn('NEVER quote, echo, summarize, or mention the request itself', prompt)
         self.assertIn("Start with the actual publishable hook", prompt)
         self.assertIn('factual plausibility', prompt)
+
+
+class GeneratedItemDraftTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user('09120000009')
+        self.workspace = Workspace.objects.create(name='AI draft test', owner=self.user)
+        WorkspaceMember.objects.create(
+            workspace=self.workspace,
+            user=self.user,
+            role='admin',
+            added_by=self.user,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.batch = GenerationBatch.objects.create(
+            workspace=self.workspace,
+            user=self.user,
+            mode='bundle',
+            capability='text',
+            topic='موضوع داخلی',
+            platform='linkedin',
+            status='success',
+        )
+        self.full_body = '\n'.join(
+            [f'بند کامل شماره {index}: متن آماده انتشار لینکدین.' for index in range(1, 31)]
+        )
+        self.item = GeneratedItem.objects.create(
+            batch=self.batch,
+            item_type='full_text',
+            content=self.full_body,
+        )
+        self.url = f'/api/workspaces/{self.workspace.id}/ai/generate/items/{self.item.id}/save/'
+
+    def test_saved_item_keeps_full_body_and_returns_same_content_on_repeat(self):
+        first = self.client.post(self.url, {}, format='json')
+        self.assertEqual(first.status_code, 200)
+        content_id = first.data['data']['content_id']
+
+        self.item.refresh_from_db()
+        self.assertEqual(str(self.item.saved_content_id), content_id)
+        self.assertEqual(self.item.saved_content.body, self.full_body)
+        self.assertEqual(len(self.item.saved_content.body.splitlines()), 30)
+
+        second = self.client.post(self.url, {}, format='json')
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.data['data']['content_id'], content_id)

@@ -69,10 +69,13 @@ def _register_upload(access_token, owner_urn):
             logger.warning('LinkedIn image initialization failed (status=%s)', resp.status_code)
             return None, 'LinkedIn تصویر را برای بارگذاری نپذیرفت.'
         value = data.get('value', {})
-        return {
+        result = {
             'upload_url': value.get('uploadUrl'),
             'asset_urn': value.get('image'),
-        }, None
+        }
+        if not result['upload_url'] or not result['asset_urn']:
+            return None, 'پاسخ LinkedIn برای بارگذاری تصویر ناقص بود.'
+        return result, None
     except requests.exceptions.RequestException:
         logger.exception('LinkedIn image initialization request failed')
         return None, 'ارتباط با LinkedIn برای بارگذاری تصویر برقرار نشد.'
@@ -100,13 +103,13 @@ def _resolve_media_path_or_url(path_or_url):
 def _upload_binary(upload_url, image_path_or_url):
     """Step 2: Upload binary image data to the uploadUrl."""
     try:
-        with open(image_path_or_url, 'rb') as f:
-            image_data = f.read()
         content_type = mimetypes.guess_type(image_path_or_url)[0] or 'application/octet-stream'
-
-        resp = requests.put(upload_url, data=image_data, headers={
-            'Content-Type': content_type,
-        }, timeout=30)
+        # Stream the file instead of reading large documents/images fully into
+        # worker memory.
+        with open(image_path_or_url, 'rb') as source:
+            resp = requests.put(upload_url, data=source, headers={
+                'Content-Type': content_type,
+            }, timeout=90)
         if not resp.ok:
             return False, f'آپلود تصویر شکست خورد: {resp.status_code}'
         return True, None
@@ -189,17 +192,24 @@ def _upload_video(access_token, owner_urn, file_path):
 
 
 def _register_document(access_token, owner_urn):
-    response = requests.post(
-        'https://api.linkedin.com/rest/documents?action=initializeUpload',
-        headers=_headers(access_token),
-        json={'initializeUploadRequest': {'owner': owner_urn}},
-        timeout=20,
-    )
-    if not response.ok:
-        logger.warning('LinkedIn document initialization failed (status=%s)', response.status_code)
-        return None, 'LinkedIn سند را برای بارگذاری نپذیرفت.'
-    value = response.json().get('value', {})
-    return {'upload_url': value.get('uploadUrl'), 'asset_urn': value.get('document')}, None
+    try:
+        response = requests.post(
+            'https://api.linkedin.com/rest/documents?action=initializeUpload',
+            headers=_headers(access_token),
+            json={'initializeUploadRequest': {'owner': owner_urn}},
+            timeout=20,
+        )
+        if not response.ok:
+            logger.warning('LinkedIn document initialization failed (status=%s)', response.status_code)
+            return None, 'LinkedIn سند را برای بارگذاری نپذیرفت.'
+        value = response.json().get('value', {})
+        result = {'upload_url': value.get('uploadUrl'), 'asset_urn': value.get('document')}
+        if not result['upload_url'] or not result['asset_urn']:
+            return None, 'پاسخ LinkedIn برای بارگذاری سند ناقص بود.'
+        return result, None
+    except (requests.exceptions.RequestException, ValueError):
+        logger.exception('LinkedIn document initialization request failed')
+        return None, 'ارتباط با LinkedIn برای بارگذاری سند برقرار نشد.'
 
 
 def _upload_asset_for_channel(access_token, owner_urn, file_path, media_type):

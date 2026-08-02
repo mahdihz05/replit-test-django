@@ -65,6 +65,9 @@ class SocialPublisherBodyTests(SimpleTestCase):
         )
         self.channel.workspace = object()
         self.content.image = None
+        self.content.body = '\n'.join(
+            f'خط {index}: بخش کامل محتوای نهایی لینکدین' for index in range(1, 31)
+        )
         post_request.return_value = SimpleNamespace(
             ok=True,
             headers={'x-restli-id': 'urn:li:share:1'},
@@ -77,6 +80,7 @@ class SocialPublisherBodyTests(SimpleTestCase):
         self.assertEqual(post_id, 'urn:li:share:1')
         payload = post_request.call_args.kwargs['json']
         self.assertEqual(payload['commentary'], self.content.body)
+        self.assertEqual(len(payload['commentary'].splitlines()), 30)
         self.assertNotIn(self.content.title, payload['commentary'])
 
 

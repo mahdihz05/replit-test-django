@@ -7,7 +7,10 @@ class GeneratedItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = GeneratedItem
-        fields = ['id', 'item_type', 'order', 'content', 'image', 'image_url', 'saved_as_draft', 'created_at']
+        fields = [
+            'id', 'item_type', 'order', 'content', 'image', 'image_url',
+            'saved_as_draft', 'saved_content_id', 'created_at'
+        ]
 
     def get_image_url(self, obj):
         if obj.image:

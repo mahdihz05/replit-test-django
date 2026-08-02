@@ -110,6 +110,9 @@ def _persist_batch_as_content_draft(batch, workspace_id, user):
         version_number=1,
         source='ai'
     )
+    text_item.saved_as_draft = True
+    text_item.saved_content = content
+    text_item.save(update_fields=['saved_as_draft', 'saved_content'])
     if image_item and image_item.image:
         content.image = image_item.image
         content.save(update_fields=['image'])
@@ -894,8 +897,11 @@ def save_generated_item(request, workspace_id, item_id):
         return Response({'success': False, 'error': 'آیتم یافت نشد', 'code': 'NOT_FOUND'},
                         status=status.HTTP_404_NOT_FOUND)
 
-    if item.saved_as_draft:
-        return Response({'success': True, 'data': {'message': 'این آیتم قبلاً ذخیره شده است'}})
+    if item.saved_as_draft and item.saved_content_id:
+        return Response({'success': True, 'data': {
+            'content_id': str(item.saved_content_id),
+            'message': 'این آیتم قبلاً ذخیره شده است',
+        }})
 
     title = request.data.get('title') or item.batch.topic[:100] or 'محتوای تولید شده'
     if item.item_type == 'title':
@@ -924,6 +930,7 @@ def save_generated_item(request, workspace_id, item_id):
         content.save(update_fields=['image'])
 
     item.saved_as_draft = True
-    item.save()
+    item.saved_content = content
+    item.save(update_fields=['saved_as_draft', 'saved_content'])
 
     return Response({'success': True, 'data': {'content_id': str(content.id), 'message': 'در پیش‌نویس‌ها ذخیره شد'}})

@@ -24,6 +24,7 @@ interface GeneratedItem {
   image?: string;
   image_url?: string;
   saved_as_draft?: boolean;
+  saved_content_id?: string | null;
 }
 
 const TABS: { id: Tab; label: string }[] = [
@@ -98,6 +99,7 @@ export default function AiGenerate() {
   const [generateImage, setGenerateImage] = useState(false);
   const [includeImage, setIncludeImage] = useState(false);
   const [savedContentId, setSavedContentId] = useState<string | null>(null);
+  const [publishContentId, setPublishContentId] = useState<string | null>(null);
   const [imageRegenerating, setImageRegenerating] = useState<Record<string, boolean>>({});
   const [imagePreviewOpen, setImagePreviewOpen] = useState<string | null>(null);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
@@ -150,6 +152,7 @@ export default function AiGenerate() {
     setResult("");
     setItems([]);
     setSavedContentId(null);
+    setPublishContentId(null);
   };
 
   const handleModeChange = (newMode: Mode) => {
@@ -302,8 +305,9 @@ export default function AiGenerate() {
     setTimeout(() => setCopied(prev => ({ ...prev, [key]: false })), 2000);
   };
 
-  const handleSaveItem = async (item: GeneratedItem) => {
-    if (!wid || item.saved_as_draft) return;
+  const handleSaveItem = async (item: GeneratedItem, showSuccessToast = true): Promise<string | null> => {
+    if (!wid) return null;
+    if (item.saved_content_id) return item.saved_content_id;
     setSaving(prev => ({ ...prev, [item.id]: true }));
     try {
       const response = await apiFetch(`/workspaces/${wid}/ai/generate/items/${item.id}/save/`, {
@@ -311,14 +315,27 @@ export default function AiGenerate() {
         data: { include_image: includeImage }
       });
       const contentId = response?.data?.content_id;
-      if (contentId) setSavedContentId(contentId);
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, saved_as_draft: true } : i));
-      toast({ title: "ذخیره شد", description: "محتوا در پیش‌نویس‌ها ذخیره شد" });
+      if (!contentId) throw new Error("شناسه پیش‌نویس از سرور دریافت نشد");
+      setItems(prev => prev.map(i => i.id === item.id ? {
+        ...i,
+        saved_as_draft: true,
+        saved_content_id: contentId,
+      } : i));
+      if (showSuccessToast) toast({ title: "ذخیره شد", description: "همین نسخه در پیش‌نویس‌ها ذخیره شد" });
+      return contentId;
     } catch (error: any) {
       toast({ title: "خطا", description: error.message || "خطا در ذخیره", variant: "destructive" });
+      return null;
     } finally {
       setSaving(prev => ({ ...prev, [item.id]: false }));
     }
+  };
+
+  const handlePublishItem = async (item: GeneratedItem) => {
+    const contentId = await handleSaveItem(item, false);
+    if (!contentId) return;
+    setPublishContentId(contentId);
+    setPublishOpen(true);
   };
 
   const handleRegenerateImage = async (item: GeneratedItem) => {
@@ -380,7 +397,10 @@ export default function AiGenerate() {
   const handlePublishStandard = async () => {
     // Persist the latest edited result before opening the in-page publisher.
     const contentId = await handleSaveStandard(false);
-    if (contentId) setPublishOpen(true);
+    if (contentId) {
+      setPublishContentId(contentId);
+      setPublishOpen(true);
+    }
   };
 
   const renderStandardForm = () => {
@@ -743,11 +763,6 @@ export default function AiGenerate() {
                     <Label htmlFor="includeImage" className="text-xs font-normal">هنگام ذخیره، تصویر هم ضمیمه شود</Label>
                   </div>
                 )}
-                {(mode === "bundle" || mode === "multi_variant") && savedContentId && (
-                  <Button size="sm" className="gap-1.5 h-8" onClick={() => setPublishOpen(true)}>
-                    <Send className="w-3.5 h-3.5" /> انتشار
-                  </Button>
-                )}
                 {mode === "standard" && result && (
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" className="gap-1.5 h-8" onClick={() => handleCopy(resultText, "standard")}>
@@ -770,7 +785,7 @@ export default function AiGenerate() {
               <div className="mb-4 p-3 bg-primary/10 rounded-lg border border-primary/20 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-primary" />
                 <span className="text-sm text-foreground">محتوای تولیدشده به‌عنوان پیش‌نویس ذخیره شد.</span>
-                <Link href={`/workspaces/${wid}/contents/${savedContentId}`} className="text-sm font-medium text-primary hover:underline mr-auto">
+                <Link href={`/contents/${savedContentId}`} className="text-sm font-medium text-primary hover:underline mr-auto">
                   مشاهده پیش‌نویس →
                 </Link>
               </div>
@@ -859,11 +874,22 @@ export default function AiGenerate() {
                               size="sm"
                               className="gap-1.5 h-8"
                               onClick={() => handleSaveItem(item)}
-                              disabled={item.saved_as_draft || saving[item.id]}
+                              disabled={Boolean(item.saved_content_id) || saving[item.id]}
                             >
                               {saving[item.id] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                              {item.saved_as_draft ? "ذخیره شده" : "ذخیره"}
+                              {item.saved_content_id ? "ذخیره شده" : "ذخیره"}
                             </Button>
+                            {["full_text", "short_text", "variant"].includes(item.item_type) && (
+                              <Button
+                                size="sm"
+                                className="gap-1.5 h-8"
+                                onClick={() => handlePublishItem(item)}
+                                disabled={saving[item.id]}
+                              >
+                                {saving[item.id] ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                                انتشار همین نسخه
+                              </Button>
+                            )}
                           </>
                         )}
                       </div>
@@ -887,7 +913,7 @@ export default function AiGenerate() {
 
       <PublishDialog
         workspaceId={wid || ""}
-        contentId={savedContentId}
+        contentId={publishContentId || savedContentId}
         open={publishOpen}
         onOpenChange={setPublishOpen}
       />

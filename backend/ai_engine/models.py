@@ -128,6 +128,13 @@ class GeneratedItem(models.Model):
     content = models.TextField(blank=True)
     image = models.ImageField(upload_to='content/images/', null=True, blank=True)
     saved_as_draft = models.BooleanField(default=False)
+    saved_content = models.OneToOneField(
+        'content.Content',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='generated_source',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

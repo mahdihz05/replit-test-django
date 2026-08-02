@@ -201,6 +201,7 @@ export default function PublishDialog({ workspaceId, contentId, open, onOpenChan
   const hasWebsite = selectedChannelObjects.some((channel) => channel.platform === "website");
   const hasLinkedInVoice = hasLinkedIn && selectedAttachments.some((item) => item.media_type === "voice");
   const linkedInExtraMedia = hasLinkedIn && selectedAttachments.filter((item) => item.media_type !== "voice").length > 1;
+  const linkedInTextTooLong = hasLinkedIn && (content?.body?.length || 0) > 3000;
 
   const toggleChannel = (id: string) => {
     setSelectedChannels((items) => (items.includes(id) ? items.filter((item) => item !== id) : [...items, id]));
@@ -258,7 +259,8 @@ export default function PublishDialog({ workspaceId, contentId, open, onOpenChan
   const canPublish = selectedChannels.length > 0
     && (publishType === "now" || Boolean(scheduledAt))
     && !publishing
-    && !uploading;
+    && !uploading
+    && !linkedInTextTooLong;
 
   const handlePublish = async () => {
     if (!workspaceId || !contentId || !canPublish) return;
@@ -331,11 +333,19 @@ export default function PublishDialog({ workspaceId, contentId, open, onOpenChan
                 <CardContent className="p-4">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold">متن نهایی قابل انتشار</p>
-                    <Badge variant="outline">عنوان داخلی ارسال نمی‌شود</Badge>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="secondary">{(content.body?.length || 0).toLocaleString("fa-IR")} نویسه · {(content.body ? content.body.split("\n").length : 0).toLocaleString("fa-IR")} خط</Badge>
+                      <Badge variant="outline">عنوان داخلی ارسال نمی‌شود</Badge>
+                    </div>
                   </div>
                   <p className="max-h-32 overflow-y-auto whitespace-pre-wrap text-sm leading-7 text-foreground/80">
                     {content.body || "متن این محتوا خالی است."}
                   </p>
+                  {linkedInTextTooLong && (
+                    <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+                      متن لینکدین باید حداکثر ۳۰۰۰ نویسه باشد؛ متن کوتاه نمی‌شود و تا زمان ویرایش ارسال نخواهد شد.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             )}
