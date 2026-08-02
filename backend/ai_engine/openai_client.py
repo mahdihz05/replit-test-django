@@ -52,7 +52,43 @@ def generate_text(goal, platform='', tone='حرفه‌ای', keywords='', langua
         goal=goal, platform=platform, tone=tone, keywords=keywords, language=language, word_count=word_count, is_caption=is_caption
     )
     text, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='text_generation')
+    if error or not text:
+        return text, error, tokens
+
+    limit = _platform_character_limit(platform, is_caption)
+    if limit and len(text) > limit:
+        shorter, shorten_error, retry_tokens = _request_length_reduction(text, limit, platform)
+        tokens += retry_tokens
+        if shorten_error or not shorter or len(shorter) > limit:
+            return None, shorten_error or 'متن تولیدشده از محدودیت پلتفرم بیشتر است.', tokens
+        text = shorter
     return text, error, tokens
+
+
+def _platform_character_limit(platform, is_caption=False):
+    """Known hard platform limits; callers currently provide no lower per-app limit."""
+    normalized = prompts._normalize_platform(platform)
+    if normalized == 'telegram':
+        return 1024 if is_caption else 4096
+    if normalized == 'linkedin':
+        return 3000
+    if normalized == 'instagram':
+        return 2200
+    return None
+
+
+def _request_length_reduction(text, limit, platform):
+    system_prompt = (
+        'You are an expert Persian editor. Return only the revised publishable text. '
+        'Preserve supplied facts, names, numbers, links, conditions, CTA, template variables, and the original certainty level. '
+        'Do not strengthen unsupported claims or add new information.'
+    )
+    user_prompt = (
+        f'Reduce the following text to no more than {limit} characters for {prompts._normalize_platform(platform)}. '
+        'Remove repetition and nonessential wording; do not cut it blindly or use an ellipsis.\n\n'
+        + prompts._delimited('source_text', text)
+    )
+    return _call_chat(system_prompt, user_prompt, operation_name='text_generation')
 
 
 def rewrite_text(text, tone='حرفه‌ای', platform=''):
@@ -208,8 +244,7 @@ def generate_image_from_text(source_text, style='', platform=''):
 def generate_summary(text, length='brief', platform=''):
     system_prompt, user_prompt = prompts.build_summary_prompt(text, length)
     if platform:
-        # Summaries are usually platform-agnostic, but if the caller provides a platform we can
-        # add a light hint that the summary may be used as caption/copy for that platform.
+        # The summary builder is general by default; add only the selected platform module.
         user_prompt = f"{prompts.get_platform_rules(platform)}\n\n{user_prompt}"
     result, error, tokens = _call_chat(system_prompt, user_prompt, operation_name='content_rewrite')
     return result, error, tokens
@@ -241,7 +276,7 @@ def chat_completion(messages, platform=''):
     if has_system:
         full_messages = messages
     else:
-        full_messages = [{'role': 'system', 'content': prompts.build_chat_system_prompt()}] + messages
+        full_messages = [{'role': 'system', 'content': prompts.build_chat_system_prompt(platform)}] + messages
 
     try:
         response = client.chat.completions.create(
@@ -315,10 +350,13 @@ def _call_openai_with_retry(system_prompt, user_prompt, response_format=None, ma
 
 def _validate_bundle(text):
     data = _parse_json(text)
-    if not data or not all(k in data for k in ('full_text', 'short_text', 'hashtags', 'title')):
+    required = ('full_text', 'short_text', 'hashtags', 'title')
+    if not isinstance(data, dict) or set(data) != set(required):
         return None
-    if not isinstance(data['hashtags'], list):
-        data['hashtags'] = [str(data['hashtags'])]
+    if not all(isinstance(data[key], str) and data[key].strip() for key in ('full_text', 'short_text', 'title')):
+        return None
+    if not isinstance(data['hashtags'], list) or not data['hashtags'] or not all(isinstance(item, str) and item.strip() for item in data['hashtags']):
+        return None
     return data
 
 
@@ -335,9 +373,11 @@ def generate_bundle(topic, platform='', tone='حرفه‌ای'):
 def _validate_variants(count):
     def validator(text):
         data = _parse_json(text)
-        if not data or not isinstance(data.get('variants'), list) or len(data['variants']) < count:
+        if (not isinstance(data, dict) or set(data) != {'variants'} or not isinstance(data.get('variants'), list)
+                or len(data['variants']) != count
+                or not all(isinstance(item, str) and item.strip() for item in data['variants'])):
             return None
-        return data['variants'][:count]
+        return data['variants']
     return validator
 
 

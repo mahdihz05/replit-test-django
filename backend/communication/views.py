@@ -447,12 +447,39 @@ def import_remap_preview(request, workspace_id, job_id):
 
 
 AI_ACTIONS = {
-    'sms-generate': ('sms_ai_generate', 'Generate three Persian SMS variants as JSON: {"variants":[{"title":"...","body":"..."}],"suggested_variables":[],"notes":""}.'),
-    'sms-rewrite': ('sms_ai_rewrite', 'Rewrite the Persian SMS in three tones and return the same JSON variant structure.'),
-    'sms-shorten': ('sms_ai_shorten', 'Shorten the Persian SMS while preserving CTA and return the same JSON variant structure.'),
-    'email-generate': ('campaign_ai_generate_bundle', 'Generate Persian email copy as JSON: {"subjects":["..."],"bodies":[{"title":"...","body":"..."}],"cta_suggestions":["..."]}.'),
-    'email-rewrite': ('email_ai_rewrite', 'Rewrite the Persian email in formal and friendly variants using the email JSON structure.'),
+    'sms-generate': 'sms_ai_generate',
+    'sms-rewrite': 'sms_ai_rewrite',
+    'sms-shorten': 'sms_ai_shorten',
+    'email-generate': 'campaign_ai_generate_bundle',
+    'email-rewrite': 'email_ai_rewrite',
 }
+
+
+def _valid_communication_ai_result(action, result):
+    """Validate the existing SMS/email response contracts before charging a wallet."""
+    if not isinstance(result, dict):
+        return False
+    if action.startswith('sms-'):
+        variants = result.get('variants')
+        return (
+            set(result) == {'variants', 'suggested_variables', 'notes'}
+            and isinstance(variants, list) and len(variants) == 3
+            and all(isinstance(item, dict) and set(item) == {'title', 'body'} and isinstance(item.get('title'), str) and item['title'].strip()
+                    and isinstance(item.get('body'), str) and item['body'].strip() for item in variants)
+            and isinstance(result.get('suggested_variables'), list)
+            and all(isinstance(item, str) and item.strip() for item in result['suggested_variables'])
+            and isinstance(result.get('notes'), str)
+        )
+    return (
+        set(result) == {'subjects', 'bodies', 'cta_suggestions'}
+        and isinstance(result.get('subjects'), list) and bool(result['subjects'])
+        and all(isinstance(item, str) and item.strip() for item in result['subjects'])
+        and isinstance(result.get('bodies'), list) and bool(result['bodies'])
+        and all(isinstance(item, dict) and set(item) == {'title', 'body'} and isinstance(item.get('title'), str) and item['title'].strip()
+                and isinstance(item.get('body'), str) and item['body'].strip() for item in result['bodies'])
+        and isinstance(result.get('cta_suggestions'), list)
+        and all(isinstance(item, str) and item.strip() for item in result['cta_suggestions'])
+    )
 
 
 @api_view(['POST'])
@@ -461,19 +488,25 @@ def ai_assist(request, workspace_id, action):
     workspace = _workspace(request, workspace_id)
     if not workspace: return _forbidden()
     if action not in AI_ACTIONS: return Response({'error': 'عملیات AI نامعتبر است'}, status=404)
-    operation, instruction = AI_ACTIONS[action]; cost = get_wallet_cost(operation)
+    operation = AI_ACTIONS[action]; cost = get_wallet_cost(operation)
     wallet = Wallet.objects.filter(workspace=workspace).first()
     if not wallet or wallet.balance < cost: return Response({'error': 'موجودی کافی نیست'}, status=402)
     prompt = str(request.data.get('prompt') or request.data.get('text') or '').strip()
     if not prompt: return Response({'error': 'توضیح یا متن الزامی است'}, status=400)
+    if action.startswith('sms-'):
+        system_prompt, user_prompt = openai_client.prompts.build_sms_prompt(action, prompt)
+    else:
+        system_prompt, user_prompt = openai_client.prompts.build_email_prompt(action, prompt)
     raw, error, tokens = openai_client._call_chat(
-        'You are a Persian marketing communication expert. Return valid JSON only.',
-        f'{instruction}\nUser request:\n{prompt}', response_format={'type': 'json_object'},
+        system_prompt, user_prompt, response_format={'type': 'json_object'},
         operation_name=operation, max_retries=2,
     )
     if error: return Response({'error': error}, status=503)
     try: result = json.loads(raw)
-    except json.JSONDecodeError: result = {'text': raw}
+    except json.JSONDecodeError:
+        return Response({'error': 'پاسخ هوش مصنوعی ساختار معتبر نداشت'}, status=503)
+    if not _valid_communication_ai_result(action, result):
+        return Response({'error': 'پاسخ هوش مصنوعی ساختار موردنیاز را نداشت'}, status=503)
     with transaction.atomic():
         wallet.balance -= cost; wallet.save(update_fields=['balance', 'updated_at'])
         WalletTransaction.objects.create(wallet=wallet, type='deduct', amount=cost, description=f'{operation} (tokens: {tokens})')

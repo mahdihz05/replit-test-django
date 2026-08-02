@@ -211,7 +211,7 @@ class CampaignTests(CommunicationTestCase):
 class CommunicationAiTests(CommunicationTestCase):
     @patch('communication.views.openai_client._call_chat')
     def test_ai_generation_is_the_only_wallet_charged_action(self, call):
-        call.return_value = ('{"variants":[{"title":"کوتاه","body":"سلام"}]}', None, 42)
+        call.return_value = ('{"variants":[{"title":"یک","body":"سلام"},{"title":"دو","body":"درود"},{"title":"سه","body":"پیام"}],"suggested_variables":[],"notes":""}', None, 42)
         before = self.wallet.balance
         response = self.client.post(f'{self.base}/ai/sms-generate/', {'prompt': 'پیام تخفیف'}, format='json')
         self.assertEqual(response.status_code, 200)
