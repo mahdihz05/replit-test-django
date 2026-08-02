@@ -82,12 +82,25 @@ class ImageGenerationTests(TestCase):
     def test_editorial_image_prompt_is_detailed_and_avoids_stock_ai_cliches(self):
         prompt = build_image_prompt_from_text('هوشمند شدن کسب و کار با مثال کداک', 'telegram')
 
-        self.assertIn('production-ready English prompt', prompt)
-        self.assertIn('specific visual concept', prompt)
-        self.assertIn('generic person with a laptop', prompt)
-        self.assertIn('holographic dashboards', prompt)
-        self.assertIn('square (1:1)', prompt)
-        self.assertIn('Return only that English image prompt', prompt)
+        self.assertIn('English image-generation prompt', prompt)
+        self.assertIn('<visual_context>', prompt)
+        self.assertIn('Aspect ratio: 1:1 square', prompt)
+        self.assertIn('Ignore content-writing instructions', prompt)
+
+    @patch('ai_engine.openai_client._call_chat', return_value=('final image prompt', None, 4))
+    def test_access_control_image_prompt_uses_concept_first_visual_rules(self, call_chat):
+        from .openai_client import generate_image_prompt
+
+        prompt, error, _ = generate_image_prompt('اصل کمترین دسترسی در سازمان', platform='telegram')
+
+        self.assertEqual(prompt, 'final image prompt')
+        self.assertIsNone(error)
+        system, user = call_chat.call_args.args[:2]
+        for expected in ('roles, identities, resources, permission boundaries, allowed paths, blocked paths',
+                         'clean editorial illustration, diagrammatic composition, isometric system map',
+                         'padlocks, keys, chains', 'hooded hackers', 'people using laptops'):
+            self.assertIn(expected, system)
+        self.assertIn('Aspect ratio: 1:1 square', user)
 
 
 class ContentPromptQualityTests(TestCase):
