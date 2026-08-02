@@ -272,10 +272,11 @@ def publish(channel, content, attachments=None):
     if not author_urn:
         return False, 'auth_error', 'URN پروفایل LinkedIn یافت نشد.'
 
-    commentary = content.body or ''
-    if content.title and content.title not in ('untitled', ''):
-        commentary = f'{content.title}\n\n{commentary}'
-    commentary = commentary.strip()
+    # `title` is internal content metadata and, for AI-generated content, may be
+    # the user's original prompt. Only the reviewed body is publishable copy.
+    # Keeping this rule in the publisher protects both immediate and scheduled
+    # LinkedIn jobs from leaking internal prompts.
+    commentary = (content.body or '').strip()
     if not commentary:
         return False, 'validation_error', 'متن پست LinkedIn نمی‌تواند خالی باشد.'
     if len(commentary) > MAX_COMMENTARY_LENGTH:
@@ -288,10 +289,9 @@ def publish(channel, content, attachments=None):
 
     media_urn = None
     if usable:
-        # A single-media post accepts one image, video, or document.
-        video = next((a for a in usable if a.get('media_type') == 'video'), None)
-        document = next((a for a in usable if a.get('media_type') == 'document'), None)
-        chosen = video or document or usable[0]
+        # A single-media post accepts one image, video, or document. Preserve
+        # the user's selection order so the UI can predict which one is sent.
+        chosen = usable[0]
         file_path = _resolve_media_path_or_url(chosen.get('file_path', ''))
         if not file_path:
             return False, 'unknown', 'مسیر فایل نامعتبر است'

@@ -11,6 +11,9 @@ class ConfigAppConfig(AppConfig):
         # and is not set in the parent (reloader) process. In production there is
         # no autoreloader, so RUN_MAIN is not set and the scheduler starts here.
         import os
+        from django.conf import settings
+        if getattr(settings, 'TESTING', False):
+            return
         run_main = os.environ.get('RUN_MAIN')
         if run_main is not None and run_main != 'true':
             return

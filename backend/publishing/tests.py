@@ -1,9 +1,20 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings
+from datetime import timedelta
 
-from .publishers import bale, telegram, wordpress
+from django.test import SimpleTestCase, TestCase, override_settings
+from django.utils import timezone
+
+from channels_app.models import PublishChannel
+from content.models import Content
+from users.models import User
+from workspaces.models import Workspace
+
+from .models import PublishJob
+from .scheduler import process_publish_queue
+
+from .publishers import bale, linkedin, telegram, wordpress
 
 
 class SocialPublisherBodyTests(SimpleTestCase):
@@ -37,6 +48,80 @@ class SocialPublisherBodyTests(SimpleTestCase):
         self.assertIsNone(error_type)
         self.assertEqual(message_id, 2)
         send_message.assert_called_once_with('test-token', '@test-channel', 'متن نهایی آماده انتشار')
+
+
+    @patch('publishing.publishers.linkedin.requests.post')
+    @patch('publishing.publishers.linkedin.decrypt_token', return_value='access-token')
+    @patch('publishing.publishers.linkedin._get_active_connection')
+    def test_linkedin_does_not_leak_internal_prompt_in_commentary(
+        self, get_connection, _decrypt, post_request
+    ):
+        get_connection.return_value = SimpleNamespace(
+            access_token='encrypted',
+            access_token_expires_at=None,
+            platform_target='personal',
+            person_urn='urn:li:person:test',
+            organization_urn='',
+        )
+        self.channel.workspace = object()
+        self.content.image = None
+        post_request.return_value = SimpleNamespace(
+            ok=True,
+            headers={'x-restli-id': 'urn:li:share:1'},
+        )
+
+        ok, error_type, post_id = linkedin.publish(self.channel, self.content)
+
+        self.assertTrue(ok)
+        self.assertIsNone(error_type)
+        self.assertEqual(post_id, 'urn:li:share:1')
+        payload = post_request.call_args.kwargs['json']
+        self.assertEqual(payload['commentary'], self.content.body)
+        self.assertNotIn(self.content.title, payload['commentary'])
+
+
+class PublishQueueSchedulingTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(phone_number='09120000001')
+        self.workspace = Workspace.objects.create(name='Queue test', owner=self.user)
+        self.content = Content.objects.create(
+            workspace=self.workspace,
+            created_by=self.user,
+            title='Internal title',
+            body='Publishable body',
+        )
+        self.channel = PublishChannel.objects.create(
+            workspace=self.workspace,
+            platform='website',
+            channel_type='site',
+            name='Test channel',
+            external_id='test-channel',
+            is_verified=True,
+        )
+
+    @patch('publishing.scheduler.attempt_publish', return_value=(True, None, 'message-id'))
+    def test_queue_processes_due_retry_but_skips_future_retry(self, attempt_publish):
+        now = timezone.now()
+        due_job = PublishJob.objects.create(
+            content=self.content,
+            channel=self.channel,
+            scheduled_at=now - timedelta(minutes=5),
+            next_retry_at=now - timedelta(seconds=1),
+        )
+        future_job = PublishJob.objects.create(
+            content=self.content,
+            channel=self.channel,
+            scheduled_at=now - timedelta(minutes=5),
+            next_retry_at=now + timedelta(hours=1),
+        )
+
+        process_publish_queue()
+
+        due_job.refresh_from_db()
+        future_job.refresh_from_db()
+        self.assertEqual(due_job.status, 'success')
+        self.assertEqual(future_job.status, 'queued')
+        attempt_publish.assert_called_once()
 
 
 class WordPressPublisherOptionsTests(SimpleTestCase):

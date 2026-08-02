@@ -1,10 +1,12 @@
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 import dj_database_url
 from decouple import Config, RepositoryEnv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+TESTING = any(arg == 'test' or arg.endswith('pytest') for arg in sys.argv)
 
 # Load local development secrets from the repository's ignored .env file.
 # Explicit process environment variables always take precedence.
@@ -192,7 +194,7 @@ SESSION_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Lax'
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = os.environ.get(
+SECURE_SSL_REDIRECT = False if TESTING else os.environ.get(
     'SECURE_SSL_REDIRECT', 'true' if not DEBUG else 'false'
 ).lower() in ('true', '1', 'yes')
 SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0

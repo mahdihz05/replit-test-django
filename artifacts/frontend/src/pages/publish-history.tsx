@@ -21,13 +21,16 @@ interface PublishLog {
 
 interface Job {
   id: string;
-  content: { id: string; title: string } | null;
+  content: string;
+  content_title: string;
   channel: { id: string; name: string; platform: string };
   status: string;
   scheduled_at: string | null;
   started_at: string | null;
   completed_at: string | null;
   attempt_count: number;
+  max_attempts: number;
+  next_retry_at: string | null;
   created_at: string;
   logs: PublishLog[];
 }
@@ -67,7 +70,7 @@ function JobRow({ job, onRetry }: { job: Job; onRetry: (id: string) => void }) {
             <div className="mt-0.5">{getPlatformIcon(job.channel.platform)}</div>
             <div className="min-w-0">
               <p className="font-medium truncate">
-                {job.content?.title || "متن مستقیم"}
+                {job.content_title || "محتوای بدون عنوان"}
               </p>
               <p className="text-sm text-muted-foreground mt-0.5">
                 {job.channel.name} · {new Date(job.created_at).toLocaleString("fa-IR")}
@@ -107,13 +110,19 @@ function JobRow({ job, onRetry }: { job: Job; onRetry: (id: string) => void }) {
               </div>
               <div>
                 <p className="text-muted-foreground text-xs mb-0.5">تلاش‌ها</p>
-                <p>{job.attempt_count} از {3}</p>
+                <p>{job.attempt_count.toLocaleString("fa-IR")} از {job.max_attempts.toLocaleString("fa-IR")}</p>
               </div>
               <div>
                 <p className="text-muted-foreground text-xs mb-0.5">زمان‌بندی</p>
                 <p>{job.scheduled_at ? new Date(job.scheduled_at).toLocaleString("fa-IR") : "فوری"}</p>
               </div>
             </div>
+
+            {job.status === "queued" && job.next_retry_at && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                تلاش بعدی در {new Date(job.next_retry_at).toLocaleString("fa-IR")} انجام می‌شود.
+              </div>
+            )}
 
             {job.logs && job.logs.length > 0 && (
               <div className="space-y-2">

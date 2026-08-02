@@ -532,15 +532,23 @@ def create_attachment_from_content_image(request, workspace_id):
                         status=status.HTTP_400_BAD_REQUEST)
 
     import os, mimetypes
-    attachment = PublishAttachment.objects.create(
+    # Reopening the publish dialog must not create duplicate media records.
+    attachment = PublishAttachment.objects.filter(
         workspace_id=workspace_id,
         content=content,
         file_path=content.image.name,
-        media_type='image',
-        mime_type=mimetypes.guess_type(content.image.name)[0] or 'image/png',
-        file_size_bytes=content.image.size if hasattr(content.image, 'size') else 0,
-        original_filename=os.path.basename(content.image.name),
-    )
+        is_active=True,
+    ).first()
+    if attachment is None:
+        attachment = PublishAttachment.objects.create(
+            workspace_id=workspace_id,
+            content=content,
+            file_path=content.image.name,
+            media_type='image',
+            mime_type=mimetypes.guess_type(content.image.name)[0] or 'image/png',
+            file_size_bytes=content.image.size if hasattr(content.image, 'size') else 0,
+            original_filename=os.path.basename(content.image.name),
+        )
 
     return Response({'success': True, 'data': PublishAttachmentSerializer(attachment).data})
 

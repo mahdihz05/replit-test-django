@@ -11,10 +11,12 @@ class BotsConfig(AppConfig):
     def ready(self):
         # Avoid starting the bot in the autoreloader parent process.
         import os
+        from django.conf import settings
+        if getattr(settings, 'TESTING', False):
+            return
         run_main = os.environ.get('RUN_MAIN')
         if run_main is not None and run_main != 'true':
             return
-        from django.conf import settings
         if getattr(settings, 'TELEGRAM_POLLING_ENABLED', True):
             try:
                 from .telegram_bot import start_bot

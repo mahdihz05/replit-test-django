@@ -1,29 +1,29 @@
 import { Switch, Route, useLocation } from "wouter";
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
-
 import { AuthProvider } from "@/lib/auth";
 import { AppLayout } from "@/components/layout";
 
-import Login from "@/pages/login";
-import Dashboard from "@/pages/dashboard";
-import Contents from "@/pages/contents";
-import ContentNew from "@/pages/contents-new";
-import ContentDetail from "@/pages/contents-detail";
-import AiChat from "@/pages/ai-chat";
-import AiGenerate from "@/pages/ai-generate";
-import AiImages from "@/pages/ai-images";
-import Channels from "@/pages/channels";
-import Publish from "@/pages/publish";
-import PublishQueue from "@/pages/publish-queue";
-import PublishHistory from "@/pages/publish-history";
-import Wallet from "@/pages/wallet";
-import Reports from "@/pages/reports";
-import Members from "@/pages/members";
-import Settings from "@/pages/settings";
-import Communication from "@/pages/communication";
+const NotFound = lazy(() => import("@/pages/not-found"));
+const Login = lazy(() => import("@/pages/login"));
+const Dashboard = lazy(() => import("@/pages/dashboard"));
+const Contents = lazy(() => import("@/pages/contents"));
+const ContentNew = lazy(() => import("@/pages/contents-new"));
+const ContentDetail = lazy(() => import("@/pages/contents-detail"));
+const AiChat = lazy(() => import("@/pages/ai-chat"));
+const AiGenerate = lazy(() => import("@/pages/ai-generate"));
+const AiImages = lazy(() => import("@/pages/ai-images"));
+const Channels = lazy(() => import("@/pages/channels"));
+const Publish = lazy(() => import("@/pages/publish"));
+const PublishQueue = lazy(() => import("@/pages/publish-queue"));
+const PublishHistory = lazy(() => import("@/pages/publish-history"));
+const Wallet = lazy(() => import("@/pages/wallet"));
+const Reports = lazy(() => import("@/pages/reports"));
+const Members = lazy(() => import("@/pages/members"));
+const Settings = lazy(() => import("@/pages/settings"));
+const Communication = lazy(() => import("@/pages/communication"));
 
 const queryClient = new QueryClient();
 
@@ -31,11 +31,12 @@ function Router() {
   const [location] = useLocation();
 
   if (location === "/login") {
-    return <Route path="/login" component={Login} />;
+    return <Suspense fallback={<PageLoading />}><Route path="/login" component={Login} /></Suspense>;
   }
 
   return (
     <AppLayout>
+      <Suspense fallback={<PageLoading />}>
       <Switch>
         <Route path="/" component={Dashboard} />
         <Route path="/contents" component={Contents} />
@@ -59,7 +60,16 @@ function Router() {
         <Route path="/communication" component={Communication} />
         <Route component={NotFound} />
       </Switch>
+      </Suspense>
     </AppLayout>
+  );
+}
+
+function PageLoading() {
+  return (
+    <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-label="در حال بارگذاری">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    </div>
   );
 }
 

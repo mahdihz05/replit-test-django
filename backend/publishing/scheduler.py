@@ -4,6 +4,7 @@ import logging
 import tempfile
 import requests as req_lib
 from datetime import timedelta
+from django.db.models import Q
 from django.utils import timezone
 from django.conf import settings
 from config.network import telegram_request
@@ -218,15 +219,22 @@ def process_publish_queue():
     from .publishers import linkedin
 
     now = timezone.now()
-    jobs = (
-        PublishJob.objects.filter(status='queued', scheduled_at__isnull=True) |
-        PublishJob.objects.filter(status='queued', scheduled_at__lte=now)
+    jobs = PublishJob.objects.filter(status='queued').filter(
+        Q(scheduled_at__isnull=True) | Q(scheduled_at__lte=now),
+    ).filter(
+        Q(next_retry_at__isnull=True) | Q(next_retry_at__lte=now),
     )
 
-    for job in jobs.select_related('content', 'channel'):
-        job.status = 'processing'
-        job.started_at = now
-        job.save()
+    for candidate in jobs.select_related('content', 'channel'):
+        # Atomically claim the job. If another process got there first, its
+        # status is no longer queued and this update affects zero rows.
+        claimed = PublishJob.objects.filter(
+            pk=candidate.pk,
+            status='queued',
+        ).update(status='processing', started_at=now)
+        if not claimed:
+            continue
+        job = PublishJob.objects.select_related('content', 'channel').get(pk=candidate.pk)
 
         # Refresh LinkedIn token before attempting if it is close to expiry
         if job.channel.platform == 'linkedin':
