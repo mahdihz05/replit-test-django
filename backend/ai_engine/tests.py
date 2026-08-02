@@ -16,10 +16,10 @@ from config.ai import (
 )
 from .models import AIConfiguration, GeneratedItem, GenerationBatch
 from .prompts import (
-    _normalize_platform, build_bundle_prompt, build_chat_system_prompt, build_hashtags_prompt,
+    _normalize_platform, build_bundle_prompt, build_chat_system_prompt, build_cta_prompt, build_hashtags_prompt,
     build_email_prompt, build_image_prompt_enhancement, build_image_prompt_from_text,
     build_rewrite_prompt, build_scenario_prompt, build_sms_prompt, build_summary_prompt,
-    build_text_prompt, build_variants_prompt,
+    build_text_prompt, build_titles_prompt, build_variants_prompt,
 )
 
 
@@ -138,6 +138,20 @@ class ContentPromptQualityTests(TestCase):
         self.assertIn('do not print labels', scenario)
         _, hashtags = build_hashtags_prompt('موضوع', 3, 'instagram')
         self.assertIn('start with #', hashtags)
+
+    def test_editorial_quality_is_used_only_for_publishable_copy(self):
+        system, prompt = build_text_prompt('اصل کمترین دسترسی و RBAC، JIT و SoD', 'telegram', 'حرفه‌ای', '', 'fa', 300)
+        self.assertIn('Editorial quality rules', system)
+        self.assertIn('informed general reader', prompt)
+        self.assertIn('Tone interpretation', prompt)
+        self.assertIn('short mobile-friendly paragraphs', system)
+        self.assertIn('hypothetical example', system)
+        title_system, _ = build_titles_prompt('اصل کمترین دسترسی', 3, 'telegram')
+        hashtag_system, _ = build_hashtags_prompt('اصل کمترین دسترسی', 3, 'telegram')
+        self.assertNotIn('Editorial quality rules', title_system)
+        self.assertNotIn('Editorial quality rules', hashtag_system)
+        _, cta = build_cta_prompt('آموزش امنیت', 'website', 2)
+        self.assertIn('without fake urgency', cta)
 
 
 class GeneratedItemDraftTests(TestCase):
